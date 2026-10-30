@@ -1,0 +1,17 @@
+# Chạy thử toàn bộ trên máy bạn:  docker compose up --build   -> http://localhost:8080
+services:
+  api:
+    build: ./backend
+    environment:
+      API_KEY: devkey1234567890
+      ASR_MODEL: small
+      PRELOAD_ASR: "0"
+    volumes: [appdata:/data]
+  web:
+    build: ./web
+    environment:
+      SITE_ADDRESS: ":80"
+    ports: ["8080:80"]
+    depends_on: [api]
+volumes:
+  appdata:

@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Unilever Voice Coach demo - 1 EC2 (Docker) + ECR + GitHub OIDC deploy role (SSM, khong can SSH).
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Description: "owner/repo cua GitHub, vi du: myname/unilever-voice"
+    AllowedPattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+  GitHubBranch:
+    Type: String
+    Default: main
+  ApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Mat khau dung chung cho web Coach va app mobile (>=16 ky tu, chi chu va so)
+    AllowedPattern: "^[A-Za-z0-9]+$"
+  InstanceType:
+    Type: String
+    Default: c6i.xlarge
+    AllowedPattern: "^[a-z0-9-]+\\.[a-z0-9]+$"
+    Description: 'Loai may EC2. Tai khoan goi Free chi cho loai free-tier (vd m7i-flex.large, c7i-flex.large). Tai khoan Paid: c6i.xlarge.'
+  AsrModel:
+    Type: String
+    Default: small
+    AllowedValues: [small, medium, large-v3]
+    Description: Model Whisper (small nhe nhat, medium chinh xac hon nhung cham tren CPU)
+  SiteAddress:
+    Type: String
+    Default: ":80"
+    Description: 'Dung :80 de chay HTTP theo IP. Neu co ten mien (vd coach.example.com) thi dien ten mien de Caddy tu cap HTTPS.'
+  AllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Dai IP duoc truy cap web/API (mac dinh mo cho tat ca, API van duoc bao ve boi API key)
+  CreateGitHubOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: 'Dat false neu tai khoan AWS cua ban DA co OIDC provider token.actions.githubusercontent.com'
+
+Conditions:
+  CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, "true"]
+
+Resources:
+  # ---------- Container registry ----------
+  ApiRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: unilever-voice-api
+      EmptyOnDelete: true
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+  WebRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: unilever-voice-web
+      EmptyOnDelete: true
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"keep last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
+
+  # ---------- GitHub OIDC (khong luu access key trong GitHub) ----------
+  GitHubOidc:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidc
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1]
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: unilever-voice-github-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidc
+                - !Ref GitHubOidc
+                - !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:sub": !Sub repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource:
+                  - !GetAtt ApiRepo.Arn
+                  - !GetAtt WebRepo.Arn
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript
+              - Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    "ssm:resourceTag/App": unilever-voice
+              - Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:DescribeInstanceInformation
+                  - ec2:DescribeInstances
+                Resource: "*"
+
+  # ---------- EC2 ----------
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Voice Coach web (80/443). Khong mo SSH - quan tri qua SSM.
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: !Ref AllowedCidr}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref AllowedCidr}
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      MetadataOptions: {HttpTokens: required}
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: {VolumeSize: 30, VolumeType: gp3, DeleteOnTermination: true}
+      Tags:
+        - {Key: Name, Value: unilever-voice}
+        - {Key: App, Value: unilever-voice}
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -eux
+          dnf install -y docker
+          systemctl enable --now docker
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          mkdir -p /opt/app
+          cat > /opt/app/.env <<'ENVEOF'
+          API_KEY=${ApiKey}
+          ASR_MODEL=${AsrModel}
+          SITE_ADDRESS=${SiteAddress}
+          ENVEOF
+          chmod 600 /opt/app/.env
+          touch /opt/app/.ready
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref Instance
+
+Outputs:
+  DeployRoleArn:
+    Description: Dan gia tri nay vao GitHub Variables -> AWS_ROLE_ARN
+    Value: !GetAtt GitHubDeployRole.Arn
+  Region:
+    Description: Dan vao GitHub Variables -> AWS_REGION
+    Value: !Ref AWS::Region
+  PublicIp:
+    Description: Dia chi web / API (http://IP)
+    Value: !Ref ElasticIp
+  InstanceId:
+    Value: !Ref Instance

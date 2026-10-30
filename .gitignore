@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+backend/data/app.db
+backend/data/audio/
+web/node_modules/
+web/dist/
+mobile/app/node_modules/
+mobile/app/.expo/
+mobile/app/dist/
+.env
