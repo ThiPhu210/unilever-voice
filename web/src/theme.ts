@@ -1,9 +1,2 @@
-// Bảng màu lấy từ logo An Hòa – Art Home
-export const BRAND = {
-  orange: "#E87A00",
-  orangeLight: "#FFB04A",
-  red: "#D91E1E",
-  brown: "#5D3A26",
-  gold: "#F5B400",
-  green: "#16A34A",
-};
+// Màu lấy từ logo An Hòa – Art Home (khung cam, chữ AH đỏ, chấm nâu)
+export const BRAND = { frame: "#E07804", red: "#CE0C0B", ink: "#3A2316", muted: "#7A6454", grid: "#EADFD3" };

@@ -1,21 +1,10 @@
 import { useEffect, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api, Overview, Unauthorized } from "../api";
 import { BRAND } from "../theme";
 
-function Kpi({ icon, tone, label, value, hint }: { icon: string; tone: string; label: string; value: string | number; hint?: string }) {
-  return (
-    <div className={`kpi tone-${tone}`}>
-      <div className="kpi-ic">{icon}</div>
-      <div className="kpi-v">{value}</div>
-      <div className="kpi-l">{label}</div>
-      {hint && <div className="kpi-h">{hint}</div>}
-    </div>
-  );
-}
-
 const RANGES: [number, string][] = [[1, "Hôm nay"], [7, "7 ngày"], [30, "30 ngày"]];
-const MEDAL = ["🥇", "🥈", "🥉"];
+const dm = (d: string) => { const [, m, day] = d.split("-"); return `${day}/${m}`; };
 
 export default function Dashboard({ onAuthError }: { onAuthError: () => void }) {
   const [days, setDays] = useState(7);
@@ -29,110 +18,103 @@ export default function Dashboard({ onAuthError }: { onAuthError: () => void }) 
         .then((d) => alive && (setData(d), setErr("")))
         .catch((e) => (e instanceof Unauthorized ? onAuthError() : setErr(String(e))));
     load();
-    const t = setInterval(load, 15000); // gần realtime: làm mới mỗi 15s
+    const t = setInterval(load, 15000);
     return () => { alive = false; clearInterval(t); };
   }, [days]);
 
-  if (err) return <div className="err">{err}</div>;
-  if (!data) return <div className="muted">Đang tải...</div>;
+  if (err) return <div className="err" role="alert">{err}</div>;
+  if (!data) return <p className="muted">Đang tải số liệu</p>;
   const k = data.kpi;
+  const max = Math.max(1, ...data.top_skus.map((s) => s.qty));
+  const maxObj = Math.max(1, ...data.objections.map((o) => o.count));
 
   return (
     <>
-      <div className="head">
+      <header className="page-head">
         <div>
-          <h2>Tổng quan</h2>
-          <div className="sub">Hành vi mua sắm &amp; chất lượng tư vấn · cập nhật tự động</div>
+          <h1>Tổng quan</h1>
+          <p className="muted">Số liệu tự cập nhật mỗi 15 giây.</p>
         </div>
-        <div className="seg-ctl">
+        <div className="tabs" role="tablist">
           {RANGES.map(([d, l]) => (
-            <button key={d} className={days === d ? "on" : ""} onClick={() => setDays(d)}>{l}</button>
+            <button key={d} role="tab" aria-selected={days === d} className={days === d ? "on" : ""} onClick={() => setDays(d)}>{l}</button>
           ))}
         </div>
-      </div>
+      </header>
 
-      <div className="kpis">
-        <Kpi icon="💬" tone="orange" label="Cuộc hội thoại" value={k.sessions} />
-        <Kpi icon="🧾" tone="red" label="Đơn chốt" value={k.orders} hint={`${k.confirmed} khách xác nhận · ${k.declined} từ chối`} />
-        <Kpi icon="✅" tone="green" label="Khách xác nhận" value={`${k.confirm_rate}%`} />
-        <Kpi icon="📦" tone="brown" label="Số lượng / đơn" value={k.avg_units_per_order} hint={`${k.avg_skus_per_order} SKU / đơn`} />
-        <Kpi icon="🎯" tone="gold" label="Tuân thủ kịch bản" value={`${k.avg_compliance}%`} />
-        <Kpi icon="⏳" tone="rose" label="Chờ SA xác nhận" value={k.pending_review} />
-      </div>
+      <dl className="facts">
+        <div><dd>{k.sessions}</dd><dt>cuộc hội thoại</dt></div>
+        <div><dd>{k.orders}</dd><dt>đơn chốt<small>{k.confirmed} khách đồng ý, {k.declined} từ chối</small></dt></div>
+        <div><dd>{k.confirm_rate}<i>%</i></dd><dt>khách đồng ý</dt></div>
+        <div><dd>{k.avg_units_per_order}</dd><dt>sản phẩm mỗi đơn<small>{k.avg_skus_per_order} mã SKU mỗi đơn</small></dt></div>
+        <div><dd>{k.avg_compliance}<i>%</i></dd><dt>tuân thủ kịch bản</dt></div>
+        <div className={k.pending_review ? "alert" : ""}><dd>{k.pending_review}</dd><dt>đơn chờ SA xác nhận</dt></div>
+      </dl>
 
-      <div className="grid2">
-        <section className="card">
-          <h3>Top SKU bán chạy</h3>
-          {data.top_skus.length === 0 ? <div className="muted">Chưa có dữ liệu</div> : (
-            <ResponsiveContainer width="100%" height={Math.max(240, data.top_skus.length * 36)}>
-              <BarChart data={data.top_skus} layout="vertical" margin={{ left: 24, right: 12 }}>
-                <defs>
-                  <linearGradient id="og" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor={BRAND.orangeLight} /><stop offset="100%" stopColor={BRAND.orange} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F0E3D3" />
-                <XAxis type="number" allowDecimals={false} tick={{ fill: "#8A6F5C", fontSize: 12 }} />
-                <YAxis type="category" dataKey="name" width={230} tick={{ fill: BRAND.brown, fontSize: 12 }} />
-                <Tooltip cursor={{ fill: "rgba(232,122,0,.08)" }} />
-                <Bar dataKey="qty" name="Số lượng" fill="url(#og)" radius={[0, 8, 8, 0]} isAnimationActive={false} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </section>
+      <section className="best">
+        <h2>Bán chạy nhất</h2>
+        {data.top_skus.length === 0 ? (
+          <p className="empty">Chưa có đơn nào trong khoảng này. Khi SA/BA ghi âm và chốt đơn trên app, sản phẩm sẽ hiện ở đây.</p>
+        ) : (
+          <ol className="bars">
+            {data.top_skus.map((s, i) => (
+              <li key={s.sku_id} className={i < 5 ? "lg" : "sm"}>
+                <i style={{ width: `${Math.max(6, (s.qty / max) * 100)}%` }} />
+                <span className="nm">{s.name}</span>
+                <span className="qt"><b>{s.qty}</b><small>{s.orders} đơn</small></span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
 
-        <section className="card">
-          <h3>Xu hướng theo ngày</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={data.by_day} margin={{ left: -10, right: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F0E3D3" />
-              <XAxis dataKey="date" tick={{ fill: "#8A6F5C", fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fill: "#8A6F5C", fontSize: 12 }} />
-              <Tooltip /><Legend />
-              <Line isAnimationActive={false} dataKey="sessions" name="Hội thoại" stroke="#B9A18C" strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line isAnimationActive={false} dataKey="orders" name="Đơn chốt" stroke={BRAND.red} strokeWidth={2.5} dot={{ r: 3 }} />
-              <Line isAnimationActive={false} dataKey="units" name="Số lượng bán" stroke={BRAND.orange} strokeWidth={2.5} dot={{ r: 3 }} />
-            </LineChart>
+      <div className="two">
+        <section className="tint">
+          <h2>Theo ngày</h2>
+          <div className="legend"><span><i className="sq o" />Sản phẩm bán</span><span><i className="sq b" />Đơn chốt</span></div>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={data.by_day.map((d) => ({ ...d, label: dm(d.date) }))} margin={{ left: -18, right: 4, top: 6 }} barGap={3}>
+              <CartesianGrid vertical={false} stroke="#EBCFA9" />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: BRAND.muted, fontSize: 12 }} />
+              <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: BRAND.muted, fontSize: 12 }} />
+              <Tooltip cursor={{ fill: "rgba(224,120,4,.1)" }} />
+              <Bar dataKey="units" name="Sản phẩm bán" fill={BRAND.frame} maxBarSize={26} isAnimationActive={false} />
+              <Bar dataKey="orders" name="Đơn chốt" fill={BRAND.ink} maxBarSize={26} isAnimationActive={false} />
+            </BarChart>
           </ResponsiveContainer>
         </section>
-      </div>
 
-      <div className="grid2">
-        <section className="card">
-          <h3>Xếp hạng SA/BA</h3>
-          <table>
-            <thead><tr><th>SA/BA</th><th>Hội thoại</th><th>Đơn</th><th>Khách XN</th><th>SL</th><th>Tuân thủ</th></tr></thead>
-            <tbody>
-              {data.by_sa.map((s, i) => (
-                <tr key={s.sa_id}>
-                  <td><span className="rank">{MEDAL[i] || i + 1}</span>{s.sa_name}</td>
-                  <td>{s.sessions}</td><td>{s.orders}</td><td>{s.confirmed}</td>
-                  <td><b>{s.units}</b></td>
-                  <td><span className={`pill ${s.avg_compliance >= 75 ? "ok" : s.avg_compliance >= 50 ? "mid" : "low"}`}>{s.avg_compliance}%</span></td>
-                </tr>
+        <section>
+          <h2>Khách do dự vì</h2>
+          {data.objections.length === 0 ? <p className="empty">Chưa nghe thấy lý do từ chối nào.</p> : (
+            <ul className="obj">
+              {data.objections.map((o) => (
+                <li key={o.key}>
+                  <div><span>{o.label}</span><b>{o.count}</b></div>
+                  <i style={{ width: `${(o.count / maxObj) * 100}%` }} />
+                </li>
               ))}
-              {data.by_sa.length === 0 && <tr><td colSpan={6} className="muted">Chưa có dữ liệu</td></tr>}
-            </tbody>
-          </table>
-        </section>
-
-        <section className="card">
-          <h3>Lý do khách từ chối / do dự</h3>
-          {data.objections.length === 0 ? <div className="muted">Chưa phát hiện</div> : (
-            <ul className="plain">
-              {data.objections.map((o) => {
-                const max = data.objections[0].count || 1;
-                return (
-                  <li key={o.key} className="obj">
-                    <div className="obj-r"><span>{o.label}</span><b>{o.count}</b></div>
-                    <div className="obj-bar"><i style={{ width: `${(o.count / max) * 100}%` }} /></div>
-                  </li>
-                );
-              })}
             </ul>
           )}
         </section>
       </div>
+
+      <section>
+        <h2>Từng SA/BA</h2>
+        <table className="tbl">
+          <thead><tr><th>Tên</th><th className="n">Hội thoại</th><th className="n">Đơn</th><th className="n">Khách đồng ý</th><th className="n">Sản phẩm</th><th>Tuân thủ kịch bản</th></tr></thead>
+          <tbody>
+            {data.by_sa.map((s) => (
+              <tr key={s.sa_id}>
+                <td><b>{s.sa_name}</b></td><td className="n">{s.sessions}</td><td className="n">{s.orders}</td>
+                <td className="n">{s.confirmed}</td><td className="n"><b>{s.units}</b></td>
+                <td><span className="meter"><i style={{ width: `${s.avg_compliance}%` }} className={s.avg_compliance < 50 ? "low" : ""} /></span>{s.avg_compliance}%</td>
+              </tr>
+            ))}
+            {data.by_sa.length === 0 && <tr><td colSpan={6} className="empty">Chưa có SA/BA nào ghi âm trong khoảng này.</td></tr>}
+          </tbody>
+        </table>
+      </section>
     </>
   );
 }

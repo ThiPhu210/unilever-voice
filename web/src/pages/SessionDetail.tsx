@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, audioUrl, fmtDur, fmtTime, SessionDetail, Unauthorized } from "../api";
 
-const plain = (s: string) =>
-  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
-const isClosing = (s: string) => /\bch[oua]t\b/.test(plain(s)) && plain(s).includes("cam on") || /\bvay minh ch[oua]t\b/.test(plain(s));
+const plain = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
+const isClosing = (s: string) => /\bvay minh ch[oua]t\b/.test(plain(s)) || (/\bch[oua]t\b/.test(plain(s)) && plain(s).includes("cam on"));
+const REPLY: Record<string, string> = { yes: "Khách đồng ý", no: "Khách từ chối", none: "Khách im lặng" };
+
+const Tick = ({ ok }: { ok: boolean }) => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" stroke={ok ? "#2E7D4F" : "#CE0C0B"} aria-label={ok ? "Đạt" : "Chưa đạt"}>
+    {ok ? <path d="M5 12.5l4.5 4.5L19 7.5" /> : <path d="M6 6l12 12M18 6L6 18" />}
+  </svg>
+);
 
 export default function SessionDetailPage({ onAuthError }: { onAuthError: () => void }) {
   const { id = "" } = useParams();
@@ -26,88 +32,74 @@ export default function SessionDetailPage({ onAuthError }: { onAuthError: () => 
 
   const seek = (t: number) => { if (audio.current) { audio.current.currentTime = t; audio.current.play(); } };
 
-  if (err) return <div className="err">{err}</div>;
-  if (!s) return <div className="muted">Đang tải...</div>;
+  if (err) return <div className="err" role="alert">{err}</div>;
+  if (!s) return <p className="muted">Đang tải cuộc hội thoại</p>;
+  const passed = s.coaching.checklist.filter((c) => c.passed).length;
 
   return (
     <>
-      <div className="head">
+      <Link to="/sessions" className="back">Quay lại danh sách</Link>
+      <header className="page-head">
         <div>
-          <Link to="/sessions" className="back">← Danh sách</Link>
-          <h2>{s.sa_name} <span className="muted">· {fmtTime(s.created_at)} · {fmtDur(s.duration)}</span></h2>
+          <h1>{s.sa_name}</h1>
+          <p className="muted">{fmtTime(s.created_at)}{s.duration != null ? `, thời lượng ${fmtDur(s.duration)}` : ""}{s.store ? `, ${s.store}` : ""}</p>
         </div>
-      </div>
+      </header>
 
-      {s.status === "error" && <div className="err">Lỗi xử lý: {s.error}</div>}
-      {(s.status === "queued" || s.status === "processing") && <div className="note">Đang dịch giọng nói ({s.status})... trang sẽ tự cập nhật.</div>}
+      {s.status === "error" && <div className="err" role="alert">Chưa xử lý được file ghi âm: {s.error}. Thử ghi âm lại, hoặc gửi lỗi này cho quản trị viên.</div>}
+      {(s.status === "queued" || s.status === "processing") && <div className="note">Đang dịch giọng nói thành văn bản. Trang tự cập nhật khi xong.</div>}
 
-      {s.has_audio && (
-        <section className="card">
-          <audio ref={audio} controls src={audioUrl(s.id)} style={{ width: "100%" }}
-                 onTimeUpdate={(e) => setNow(e.currentTarget.currentTime)} />
-        </section>
-      )}
-
-      <div className="grid2 wide-left">
-        <section className="card">
-          <h3>Transcript</h3>
+      <div className="detail">
+        <div>
+          {s.has_audio && <audio ref={audio} controls src={audioUrl(s.id)} onTimeUpdate={(e) => setNow(e.currentTarget.currentTime)} />}
+          <h2>Nội dung hội thoại</h2>
           {s.segments.length > 0 ? (
-            <div className="transcript">
+            <ol className="tx">
               {s.segments.map((g, i) => {
                 const active = now >= g.start && now < g.end;
                 const closing = isClosing(g.text);
                 return (
-                  <div key={i} className={`seg${active ? " active" : ""}${closing ? " closing" : ""}`} onClick={() => seek(g.start)}>
-                    <span className="ts">{fmtDur(g.start)}</span>
-                    <span>{g.text}</span>
-                    {closing && <span className="badge yes">Câu chốt</span>}
-                  </div>
+                  <li key={i} className={`${active ? "active" : ""} ${closing ? "closing" : ""}`}>
+                    <button onClick={() => seek(g.start)}>
+                      <time>{fmtDur(g.start)}</time>
+                      <span>{g.text}{closing && <em>Câu chốt đơn</em>}</span>
+                    </button>
+                  </li>
                 );
               })}
-            </div>
-          ) : (
-            <p className="pre">{s.transcript_text || "Chưa có transcript"}</p>
-          )}
-        </section>
+            </ol>
+          ) : <p className="plain-tx">{s.transcript_text || "Chưa có nội dung."}</p>}
+        </div>
 
-        <div>
-          <section className="card">
-            <h3>Đơn khách chốt</h3>
-            {s.orders.length === 0 && <div className="muted">Không phát hiện câu chốt đơn.</div>}
-            {s.orders.map((o, k) => (
-              <div key={o.id} className="order">
-                <div className="order-h">
-                  <b>Đơn {k + 1}</b>
-                  <span className={`badge ${o.customer_confirm}`}>
-                    {o.customer_confirm === "yes" ? "Khách đồng ý" : o.customer_confirm === "no" ? "Khách từ chối" : "Khách im lặng"}
-                  </span>
-                  {o.needs_review && !o.reviewed ? <span className="badge warn">chờ SA xác nhận</span> : null}
-                </div>
-                <table>
-                  <thead><tr><th>SKU</th><th>SL</th><th>Tin cậy</th></tr></thead>
-                  <tbody>
-                    {o.items.map((it, i) => (
-                      <tr key={i}>
-                        <td>{it.sku_name}{it.manual && <span className="badge">SA sửa</span>}</td>
-                        <td><b>{it.qty}</b></td>
-                        <td className={it.need_confirm ? "low" : ""}>{Math.round(it.conf * 100)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        <div className="side-col">
+          <h2>Đơn khách chốt</h2>
+          {s.orders.length === 0 && <p className="empty">Không nghe thấy câu chốt đơn trong cuộc này.</p>}
+          {s.orders.map((o, k) => (
+            <div key={o.id} className="order">
+              <div className="order-h">
+                <h3>Đơn {k + 1}</h3>
+                <span className={`st r-${o.customer_confirm}`}>{REPLY[o.customer_confirm]}</span>
               </div>
-            ))}
-          </section>
+              <table>
+                <tbody>
+                  {o.items.map((it, i) => (
+                    <tr key={i}>
+                      <td>{it.sku_name}{it.manual && <small className="sub">SA đã sửa tay</small>}{it.need_confirm && !o.reviewed && <small className="warn">Chưa chắc chắn ({Math.round(it.conf * 100)}%)</small>}</td>
+                      <td className="q">{it.qty}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {o.needs_review && !o.reviewed ? <p className="warn-line">SA cần xác nhận lại đơn này trên app.</p> : null}
+            </div>
+          ))}
 
-          <section className="card">
-            <h3>Tuân thủ kịch bản <span className="score">{s.coaching.score}%</span></h3>
-            <ul className="plain">
-              {s.coaching.checklist.map((c) => (
-                <li key={c.key}><span>{c.label}</span><b className={c.passed ? "ok" : "bad"}>{c.passed ? "✓" : "✗"}</b></li>
-              ))}
-            </ul>
-            {s.coaching.objections.length > 0 && <p className="muted">Khách do dự: {s.coaching.objections.join(", ")}</p>}
-          </section>
+          <h2>Tuân thủ kịch bản</h2>
+          <p className="muted score">{passed} trên {s.coaching.checklist.length} mục đạt</p>
+          <ul className="checks">
+            {s.coaching.checklist.map((c) => <li key={c.key}><Tick ok={c.passed} />{c.label}</li>)}
+          </ul>
+          {s.coaching.objections.length > 0 && <p className="muted">Khách có dấu hiệu do dự: {s.coaching.objections.join(", ")}.</p>}
         </div>
       </div>
     </>
