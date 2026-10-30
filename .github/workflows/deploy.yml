@@ -1,11 +1,13 @@
+
 name: Deploy to AWS
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  id-token: write   # cho OIDC
+  id-token: write
   contents: read
 
 concurrency:
@@ -20,8 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
+
       - working-directory: backend
         run: |
           pip install fastapi "uvicorn[standard]" python-multipart rapidfuzz pytest httpx
@@ -30,21 +35,49 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
+      # ==========================================
+      # DEBUG OIDC CLAIMS
+      # ==========================================
+      - name: Debug OIDC claims
+        run: |
+          TOKEN=$(curl -fsS \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['value'])")
+
+          echo "$TOKEN" | python3 -c "
+          import sys, json, base64
+          p = sys.stdin.read().split('.')[1]
+          p += '=' * (-len(p) % 4)
+          d = json.loads(base64.urlsafe_b64decode(p))
+          print({k: d.get(k) for k in ('sub', 'aud', 'repository', 'ref')})
+          "
+
+      # ==========================================
+      # CONFIGURE AWS CREDENTIALS
+      # ==========================================
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
+      # ==========================================
+      # LOGIN TO ECR
+      # ==========================================
       - name: Login to ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - uses: docker/setup-buildx-action@v3
 
+      # ==========================================
+      # BUILD & PUSH API IMAGE
+      # ==========================================
       - name: Build & push API image
         uses: docker/build-push-action@v6
         with:
@@ -56,6 +89,9 @@ jobs:
           cache-from: type=gha,scope=api
           cache-to: type=gha,mode=max,scope=api
 
+      # ==========================================
+      # BUILD & PUSH WEB IMAGE
+      # ==========================================
       - name: Build & push Web image
         uses: docker/build-push-action@v6
         with:
@@ -67,21 +103,30 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
+      # ==========================================
+      # DEPLOY TO EC2 VIA SSM
+      # ==========================================
       - name: Deploy to EC2 via SSM
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters "Name=tag:App,Values=unilever-voice" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
           if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
-            echo "Không tìm thấy EC2 đang chạy (tag App=unilever-voice). Instance có đang Stop không?"; exit 1
+            echo "Không tìm thấy EC2 đang chạy (tag App=unilever-voice). Instance có đang Stop không?"
+            exit 1
           fi
+
           echo "Instance: $INSTANCE_ID"
 
           ACCOUNT="${REGISTRY%%.*}"
+
           COMPOSE_B64=$(base64 -w0 deploy/docker-compose.prod.yml)
           SCRIPT_B64=$(base64 -w0 deploy/remote-deploy.sh)
+
           CMD="mkdir -p /opt/app && echo $COMPOSE_B64 | base64 -d > /opt/app/docker-compose.yml && echo $SCRIPT_B64 | base64 -d > /opt/app/remote-deploy.sh && REGION=$AWS_REGION ACCOUNT=$ACCOUNT API_IMAGE=$REGISTRY/unilever-voice-api:${GITHUB_SHA} WEB_IMAGE=$REGISTRY/unilever-voice-web:${GITHUB_SHA} bash /opt/app/remote-deploy.sh"
 
           CMD_ID=$(aws ssm send-command \
@@ -90,15 +135,30 @@ jobs:
             --comment "deploy ${GITHUB_SHA}" \
             --timeout-seconds 900 \
             --parameters "commands=[\"$CMD\"]" \
-            --query 'Command.CommandId' --output text)
+            --query 'Command.CommandId' \
+            --output text)
 
-          # Chờ lệnh chạy xong (tối đa ~15 phút)
+          # Chờ lệnh chạy xong (tối đa 15 phút)
           for i in $(seq 1 90); do
-            STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || echo Pending)
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "$CMD_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+
             echo "[$i] $STATUS"
-            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break;; esac
+
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) break ;;
+            esac
+
             sleep 10
           done
-          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$INSTANCE_ID" \
-            --query '{out:StandardOutputContent,err:StandardErrorContent}' --output text | tail -60
+
+          aws ssm get-command-invocation \
+            --command-id "$CMD_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query '{out:StandardOutputContent,err:StandardErrorContent}' \
+            --output text | tail -60
+
           [ "$STATUS" = "Success" ]
