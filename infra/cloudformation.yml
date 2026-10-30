@@ -86,7 +86,15 @@ Resources:
             Condition:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
-                "token.actions.githubusercontent.com:sub": !Sub repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}
+              StringLike:
+                # GitHub co the gui sub dang cu (repo:owner/repo:...) hoac dang moi co ma so
+                # (repo:owner@ID/repo@ID:...). Chap nhan ca hai, van khoa theo ten owner/repo/nhanh.
+                "token.actions.githubusercontent.com:sub":
+                  - !Sub repo:${GitHubRepo}:ref:refs/heads/${GitHubBranch}
+                  - !Sub
+                    - repo:${Owner}@*/${Name}@*:ref:refs/heads/${GitHubBranch}
+                    - Owner: !Select [0, !Split ["/", !Ref GitHubRepo]]
+                      Name: !Select [1, !Split ["/", !Ref GitHubRepo]]
       Policies:
         - PolicyName: deploy
           PolicyDocument:

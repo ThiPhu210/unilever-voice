@@ -35,7 +35,7 @@ export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
   return (
     <>
       <div className="head">
-        <h2>Cuộc hội thoại</h2>
+        <div><h2>Cuộc hội thoại</h2><div className="sub">Lịch sử tư vấn của SA/BA · bấm Xem để nghe lại và đọc transcript</div></div>
         <select value={sa} onChange={(e) => setSa(e.target.value)}>
           <option value="">Tất cả SA/BA</option>
           {sas.map((s) => <option key={s}>{s}</option>)}
@@ -48,7 +48,7 @@ export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
           <tbody>
             {shown.map((r) => (
               <tr key={r.id}>
-                <td>{fmtTime(r.created_at)}</td><td>{r.sa_name}</td><td>{r.store || "–"}</td>
+                <td>{fmtTime(r.created_at)}</td><td><span className="avatar">{r.sa_name.trim().split(" ").pop()?.[0]?.toUpperCase()}</span>{r.sa_name}</td><td>{r.store || "–"}</td>
                 <td>{fmtDur(r.duration)}</td>
                 <td><span className={`badge st-${r.status}`}>{STATUS[r.status] || r.status}</span></td>
                 <td>{r.orders}{r.pending_review ? <span className="badge warn">cần XN</span> : null}</td>

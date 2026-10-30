@@ -21,13 +21,25 @@ export default function Login({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="login">
-      <form className="card" onSubmit={submit}>
-        <h1>Voice<span>Coach</span></h1>
-        <p className="muted">Đăng nhập Coach Console</p>
-        <input type="password" placeholder="API key" value={key} onChange={(e) => setK(e.target.value)} autoFocus />
-        {err && <div className="err">{err}</div>}
-        <button disabled={busy || !key}>{busy ? "Đang kiểm tra..." : "Đăng nhập"}</button>
-      </form>
+      <div className="hero">
+        <i className="blob b1" /><i className="blob b2" /><i className="blob b3" />
+        <div className="hero-in">
+          <img src="/logo.png" alt="An Hòa – Art Home" className="hero-logo" />
+          <h1>Voice Coach</h1>
+          <p>Ghi nhận, dịch và phân tích hội thoại tư vấn của SA/BA.<br />Hiểu khách hàng đang mua gì, tư vấn ra sao – theo thời gian thực.</p>
+        </div>
+      </div>
+      <div className="login-side">
+        <form className="login-card" onSubmit={submit}>
+          <h2>Chào mừng trở lại 👋</h2>
+          <p className="muted">Đăng nhập Coach Console</p>
+          <label>API key</label>
+          <input type="password" placeholder="Nhập API key" value={key} onChange={(e) => setK(e.target.value)} autoFocus />
+          {err && <div className="err">{err}</div>}
+          <button className="btn" disabled={busy || !key}>{busy ? "Đang kiểm tra..." : "Đăng nhập"}</button>
+          <div className="foot">An Hòa · Art Home Company</div>
+        </form>
+      </div>
     </div>
   );
 }
