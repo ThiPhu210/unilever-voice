@@ -1,4 +1,8 @@
+// Cùng bảng màu với web Coach (logo An Hòa – Art Home): khung cam, đỏ nhấn, nâu đậm.
 export const C = {
-  bg: "#f4f6fa", card: "#ffffff", ink: "#1b2333", muted: "#6b7589", line: "#e4e8f0",
-  blue: "#1f5eff", green: "#16a34a", red: "#dc2626", amber: "#d97706",
+  bg: "#FBF7F2", card: "#FFFFFF", ink: "#3A2316", muted: "#7A6454", line: "#EADFD3",
+  tint: "#FFF1DD", brand: "#E07804", red: "#CE0C0B", redBg: "#FDECEA",
+  green: "#2E7D4F", greenBg: "#E8F4EC", amber: "#B35900", amberBg: "#FFF4E0",
 };
+
+export const R = { card: 14, input: 10, pill: 99 };

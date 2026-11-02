@@ -67,3 +67,46 @@ def test_upload_asr_error_is_recorded(monkeypatch):
     sid = c.post("/api/sessions", files={"audio": ("r.m4a", b"x", "audio/m4a")}).json()["id"]
     s = c.get(f"/api/sessions/{sid}").json()
     assert s["status"] == "error" and "model missing" in s["error"]
+
+
+def test_gia_va_sua_gia_va_doanh_thu():
+    r = c.post("/api/sessions/text", json={
+        "transcript": "Dạ em xin cảm ơn anh chị, vậy mình chốt 2 omo 800g 65 nghìn đồng, 1 clear men 650ml. Dạ ok em.",
+        "sa_id": "sa09", "sa_name": "Giá"})
+    sid = r.json()["id"]
+    s = c.get(f"/api/sessions/{sid}").json()
+    o = s["orders"][0]
+    assert o["missing_price"] == 1 and o["total"] == 130000
+    row = [x for x in c.get("/api/sessions?sa_id=sa09").json() if x["id"] == sid][0]
+    assert row["missing_price"] == 1 and row["revenue"] == 130000
+    # SA bổ sung giá quên nói + thêm 1 SKU
+    items = [{"sku_id": "OMO-BOT-800G", "qty": 2, "price": 65000},
+             {"sku_id": "CLEAR-MEN-650ML", "qty": 1, "price": 120000},
+             {"sku_id": "DOVE-640ML", "qty": 1, "price": 99000}]
+    f = c.put(f"/api/orders/{o['id']}/items", json=items).json()
+    assert [i["price"] for i in f["items"]] == [65000, 120000, 99000]
+    o2 = c.get(f"/api/sessions/{sid}").json()["orders"][0]
+    assert o2["missing_price"] == 0 and o2["total"] == 349000 and o2["reviewed"] == 1
+    ov = c.get("/api/stats/overview?days=1").json()
+    assert ov["kpi"]["revenue"] >= 349000
+    sk = c.get("/api/stats/skus?days=3").json()
+    omo = [x for x in sk["skus"] if x["sku_id"] == "OMO-BOT-800G"][0]
+    assert omo["revenue"] >= 130000 and omo["avg_price"] == 65000 and len(omo["by_day"]) == 3
+
+
+def test_sua_gia_khong_hop_le():
+    r = c.post("/api/sessions/text", json={"transcript": "vậy mình chốt 1 omo 800g.", "sa_id": "sa10"})
+    oid = c.get(f"/api/sessions/{r.json()['id']}").json()["orders"][0]["id"]
+    assert c.put(f"/api/orders/{oid}/items", json=[{"sku_id": "OMO-BOT-800G", "qty": 1, "price": -5}]).status_code == 400
+    assert c.put(f"/api/orders/{oid}/items", json=[]).status_code == 400
+    assert c.put("/api/orders/999999/items", json=[{"sku_id": "OMO-BOT-800G", "qty": 1}]).status_code == 404
+
+
+def test_sa_them_don_thu_cong():
+    sid = c.post("/api/sessions/text", json={"transcript": "Chào chị ạ, chị cần gì ạ?", "sa_id": "sa11"}).json()["id"]
+    assert c.get(f"/api/sessions/{sid}").json()["orders"] == []
+    r = c.post(f"/api/sessions/{sid}/orders", json=[{"sku_id": "OMO-BOT-800G", "qty": 2, "price": 65000}])
+    assert r.status_code == 200
+    o = c.get(f"/api/sessions/{sid}").json()["orders"][0]
+    assert o["total"] == 130000 and o["reviewed"] == 1 and o["customer_confirm"] == "yes"
+    assert c.post("/api/sessions/nope/orders", json=[{"sku_id": "OMO-BOT-800G", "qty": 1}]).status_code == 404
