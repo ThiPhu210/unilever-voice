@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Sessions from "./pages/Sessions";
 import SessionDetailPage from "./pages/SessionDetail";
+import Products from "./pages/Products";
 
 export default function App() {
   const [authed, setAuthed] = useState(!!getKey());
@@ -17,6 +18,7 @@ export default function App() {
         <nav>
           <NavLink to="/" end>Tổng quan</NavLink>
           <NavLink to="/sessions">Cuộc hội thoại</NavLink>
+          <NavLink to="/products">Sản phẩm</NavLink>
         </nav>
         <button className="rail-out" onClick={logout}>Đăng xuất</button>
       </aside>
@@ -24,6 +26,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard onAuthError={logout} />} />
           <Route path="/sessions" element={<Sessions onAuthError={logout} />} />
+          <Route path="/products" element={<Products onAuthError={logout} />} />
           <Route path="/sessions/:id" element={<SessionDetailPage onAuthError={logout} />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

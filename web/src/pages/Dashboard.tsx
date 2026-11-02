@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { api, Overview, Unauthorized } from "../api";
+import { api, dm, Overview, Unauthorized, vnd, vndParts, vndShort } from "../api";
 import { BRAND } from "../theme";
 
 const RANGES: [number, string][] = [[1, "Hôm nay"], [7, "7 ngày"], [30, "30 ngày"]];
-const dm = (d: string) => { const [, m, day] = d.split("-"); return `${day}/${m}`; };
 
 export default function Dashboard({ onAuthError }: { onAuthError: () => void }) {
   const [days, setDays] = useState(7);
@@ -44,15 +44,16 @@ export default function Dashboard({ onAuthError }: { onAuthError: () => void }) 
 
       <dl className="facts">
         <div><dd>{k.sessions}</dd><dt>cuộc hội thoại</dt></div>
-        <div><dd>{k.orders}</dd><dt>đơn chốt<small>{k.confirmed} khách đồng ý, {k.declined} từ chối</small></dt></div>
-        <div><dd>{k.confirm_rate}<i>%</i></dd><dt>khách đồng ý</dt></div>
+        <div><dd>{k.orders}</dd><dt>đơn chốt<small>{k.confirmed} khách đồng ý ({k.confirm_rate}%), {k.declined} từ chối</small></dt></div>
+        <div><dd>{vndParts(k.revenue)[0]}<i>{vndParts(k.revenue)[1]}</i></dd><dt>doanh thu ghi nhận<small>trung bình {vnd(k.avg_order_value)} mỗi đơn</small></dt></div>
         <div><dd>{k.avg_units_per_order}</dd><dt>sản phẩm mỗi đơn<small>{k.avg_skus_per_order} mã SKU mỗi đơn</small></dt></div>
         <div><dd>{k.avg_compliance}<i>%</i></dd><dt>tuân thủ kịch bản</dt></div>
-        <div className={k.pending_review ? "alert" : ""}><dd>{k.pending_review}</dd><dt>đơn chờ SA xác nhận</dt></div>
+        <div className={k.pending_review + k.missing_price ? "alert" : ""}><dd>{k.pending_review + k.missing_price}</dd><dt>đơn chờ SA xử lý<small>{k.pending_review} cần xác nhận SKU, {k.missing_price} thiếu giá</small></dt></div>
       </dl>
 
       <section className="best">
         <h2>Bán chạy nhất</h2>
+        <p className="muted sub-h">Theo số lượng. Xu hướng từng sản phẩm xem ở trang <Link to="/products">Sản phẩm</Link>.</p>
         {data.top_skus.length === 0 ? (
           <p className="empty">Chưa có đơn nào trong khoảng này. Khi SA/BA ghi âm và chốt đơn trên app, sản phẩm sẽ hiện ở đây.</p>
         ) : (
@@ -61,7 +62,7 @@ export default function Dashboard({ onAuthError }: { onAuthError: () => void }) 
               <li key={s.sku_id} className={i < 5 ? "lg" : "sm"}>
                 <i style={{ width: `${Math.max(6, (s.qty / max) * 100)}%` }} />
                 <span className="nm">{s.name}</span>
-                <span className="qt"><b>{s.qty}</b><small>{s.orders} đơn</small></span>
+                <span className="qt"><b>{s.qty}</b><small>{s.orders} đơn{s.revenue > 0 ? `, ${vndShort(s.revenue)}` : ""}</small></span>
               </li>
             ))}
           </ol>
@@ -102,16 +103,16 @@ export default function Dashboard({ onAuthError }: { onAuthError: () => void }) 
       <section>
         <h2>Từng SA/BA</h2>
         <table className="tbl">
-          <thead><tr><th>Tên</th><th className="n">Hội thoại</th><th className="n">Đơn</th><th className="n">Khách đồng ý</th><th className="n">Sản phẩm</th><th>Tuân thủ kịch bản</th></tr></thead>
+          <thead><tr><th>Tên</th><th className="n">Hội thoại</th><th className="n">Đơn</th><th className="n">Khách đồng ý</th><th className="n">Sản phẩm</th><th className="n">Doanh thu</th><th>Tuân thủ kịch bản</th></tr></thead>
           <tbody>
             {data.by_sa.map((s) => (
               <tr key={s.sa_id}>
                 <td><b>{s.sa_name}</b></td><td className="n">{s.sessions}</td><td className="n">{s.orders}</td>
-                <td className="n">{s.confirmed}</td><td className="n"><b>{s.units}</b></td>
+                <td className="n">{s.confirmed}</td><td className="n"><b>{s.units}</b></td><td className="n">{vnd(s.revenue)}</td>
                 <td><span className="meter"><i style={{ width: `${s.avg_compliance}%` }} className={s.avg_compliance < 50 ? "low" : ""} /></span>{s.avg_compliance}%</td>
               </tr>
             ))}
-            {data.by_sa.length === 0 && <tr><td colSpan={6} className="empty">Chưa có SA/BA nào ghi âm trong khoảng này.</td></tr>}
+            {data.by_sa.length === 0 && <tr><td colSpan={7} className="empty">Chưa có SA/BA nào ghi âm trong khoảng này.</td></tr>}
           </tbody>
         </table>
       </section>

@@ -6,7 +6,7 @@ if [ -d app ]; then echo "mobile/app đã tồn tại, bỏ qua bước tạo.";
 npx create-expo-app@latest app --template blank-typescript --no-install
 cd app
 npm install
-npx expo install expo-audio expo-secure-store expo-keep-awake @react-native-async-storage/async-storage
+npx expo install expo-audio expo-secure-store expo-keep-awake react-native-safe-area-context @react-native-async-storage/async-storage
 cp -r ../overlay/App.tsx ../overlay/src .
 node -e '
 const fs=require("fs"); const p=JSON.parse(fs.readFileSync("app.json"));

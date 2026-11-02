@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, audioUrl, fmtDur, fmtTime, SessionDetail, Unauthorized } from "../api";
+import { api, audioUrl, fmtDur, fmtTime, SessionDetail, Unauthorized, vnd } from "../api";
 
 const plain = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").toLowerCase();
 const isClosing = (s: string) => /\bvay minh ch[oua]t\b/.test(plain(s)) || (/\bch[oua]t\b/.test(plain(s)) && plain(s).includes("cam on"));
@@ -81,16 +81,21 @@ export default function SessionDetailPage({ onAuthError }: { onAuthError: () => 
                 <span className={`st r-${o.customer_confirm}`}>{REPLY[o.customer_confirm]}</span>
               </div>
               <table>
+                <thead><tr><th>Sản phẩm</th><th className="q">SL</th><th className="p">Đơn giá</th><th className="p">Thành tiền</th></tr></thead>
                 <tbody>
                   {o.items.map((it, i) => (
                     <tr key={i}>
                       <td>{it.sku_name}{it.manual && <small className="sub">SA đã sửa tay</small>}{it.need_confirm && !o.reviewed && <small className="warn">Chưa chắc chắn ({Math.round(it.conf * 100)}%)</small>}</td>
                       <td className="q">{it.qty}</td>
+                      <td className="p">{it.price == null ? <span className="miss">Chưa có giá</span> : vnd(it.price)}</td>
+                      <td className="p">{it.price == null ? "–" : <b>{vnd(it.qty * it.price)}</b>}</td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot><tr><td colSpan={3}>Tổng đơn</td><td className="p">{vnd(o.total)}</td></tr></tfoot>
               </table>
-              {o.needs_review && !o.reviewed ? <p className="warn-line">SA cần xác nhận lại đơn này trên app.</p> : null}
+              {o.missing_price > 0 && <p className="warn-line">{o.missing_price} sản phẩm chưa có giá. SA/BA sẽ bổ sung trên app, tổng đơn chưa tính các dòng này.</p>}
+              {o.needs_review && !o.reviewed ? <p className="warn-line">SA cần xác nhận lại SKU của đơn này trên app.</p> : null}
             </div>
           ))}
 

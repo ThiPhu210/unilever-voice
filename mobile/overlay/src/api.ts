@@ -1,4 +1,4 @@
-import { CatalogItem, SessionDetail, SessionRow, Settings } from "./types";
+import { CatalogItem, LineIn, SessionDetail, SessionRow, Settings } from "./types";
 import { getQueue, Pending, setQueue } from "./storage";
 
 async function req<T>(s: Settings, path: string, init: RequestInit = {}): Promise<T> {
@@ -17,14 +17,21 @@ export const listSessions = (s: Settings) =>
   req<SessionRow[]>(s, `/api/sessions?sa_id=${encodeURIComponent(s.saId)}&limit=50`);
 export const getSession = (s: Settings, id: string) => req<SessionDetail>(s, `/api/sessions/${id}`);
 export const getCatalog = (s: Settings) => req<CatalogItem[]>(s, "/api/catalog");
-export const fixOrder = (s: Settings, orderId: number, items: { sku_id: string; qty: number }[]) =>
+export const fixOrder = (s: Settings, orderId: number, items: LineIn[]) =>
   req(s, `/api/orders/${orderId}/items`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(items),
   });
+/** SA/BA tự thêm đơn khi hệ thống không nghe thấy câu chốt đơn. */
+export const addOrder = (s: Settings, sessionId: string, items: LineIn[]) =>
+  req(s, `/api/sessions/${sessionId}/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(items),
+  });
 
-async function uploadOne(s: Settings, p: Pending) {
+async function uploadOne(s: Settings, p: Pending): Promise<string> {
   const form = new FormData();
   form.append("audio", { uri: p.uri, name: `rec-${p.createdAt}.m4a`, type: "audio/m4a" } as any);
   form.append("sa_id", p.saId);
@@ -36,21 +43,23 @@ async function uploadOne(s: Settings, p: Pending) {
     body: form,
   });
   if (!res.ok) throw new Error(`Upload lỗi ${res.status}`);
+  return (await res.json()).id as string;
 }
 
-/** Thêm bản ghi vào hàng đợi rồi thử gửi toàn bộ. Trả về số bản còn tồn. */
-export async function enqueueAndFlush(s: Settings, uri?: string): Promise<number> {
+/** Thêm bản ghi vào hàng đợi rồi thử gửi toàn bộ. Trả về số bản còn tồn + id các cuộc vừa gửi được. */
+export async function enqueueAndFlush(s: Settings, uri?: string): Promise<{ left: number; ids: string[] }> {
   const q = await getQueue();
   if (uri) q.push({ uri, saId: s.saId, saName: s.saName, store: s.store, createdAt: Date.now() });
   const left: Pending[] = [];
+  const ids: string[] = [];
   for (const p of q) {
     try {
-      await uploadOne(s, p);
+      ids.push(await uploadOne(s, p));
     } catch {
       left.push(p); // mất mạng/server lỗi: giữ lại gửi sau
     }
   }
   await setQueue(left);
-  return left.length;
+  return { left: left.length, ids };
 }
 export const pendingCount = async () => (await getQueue()).length;

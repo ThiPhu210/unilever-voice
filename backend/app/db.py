@@ -39,11 +39,12 @@ def query(sql, args=()):
         return [dict(r) for r in c.execute(sql, args).fetchall()]
 
 
-def save_orders(session_id: str, parsed: dict):
+def save_orders(session_id: str, parsed: dict, created_at: str | None = None):
     import json
     for o in parsed["orders"]:
         execute(
-            "INSERT INTO orders(session_id,closing_text,customer_confirm,items_json,needs_review) VALUES(?,?,?,?,?)",
+            "INSERT INTO orders(session_id,closing_text,customer_confirm,items_json,needs_review,created_at) "
+            "VALUES(?,?,?,?,?,COALESCE(?,datetime('now')))",
             (session_id, o["closing_text"], o["customer_confirm"],
-             json.dumps(o["items"], ensure_ascii=False), int(o["needs_review"])),
+             json.dumps(o["items"], ensure_ascii=False), int(o["needs_review"]), created_at),
         )
