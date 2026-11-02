@@ -7,13 +7,12 @@ from .normalize import normalize
 from .numbers import parse_number
 from .tokens import TOKEN_RE, SIZE_RE, SIZE_UNIT_MAP, size_norm
 from .catalog import Catalog
-from .prices import parse_price, price_suspect
 
 SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
              "bich", "hu", "bo", "lo", "can", "bao", "vi"}
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
-             "cai", "x", "la", "don", "gia", "moi", "tien", "dong", "vnd", "d"}
+             "cai", "x", "la", "don"}
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
 AMBIGUOUS = {"nam", "sau"}  # vừa là số vừa là từ thường (clear nam, ...)
 CLOSE_PREV = {"minh", "vay", "em", "nhe", "la", "se", "luon", "anh", "chi", "con"}
@@ -64,16 +63,16 @@ def detect_customer_confirm(after: str) -> tuple[str, str | None]:
     return "none", None
 
 
-def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
+def scan_segments(text: str) -> list[tuple[int | None, list[str]]]:
     toks = TOKEN_RE.findall(text)
-    segs, qty, name, price = [], None, [], None
+    segs, qty, name = [], None, []
 
     def flush():
-        nonlocal qty, name, price
+        nonlocal qty, name
         words = [t for t in name if t not in STOP_NAME]
         if words:
-            segs.append((qty, words, price))
-        qty, name, price = None, [], None
+            segs.append((qty, words))
+        qty, name = None, []
 
     i, n = 0, len(toks)
     while i < n:
@@ -85,11 +84,6 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             name.append(size_norm(m.group(1), m.group(2))); i += 1; continue
         if t in LEAD_STRIP and not name and qty is None:
             i += 1; continue
-        if name and price is None:
-            pr = parse_price(toks, i)  # "... 65 nghìn đồng" ngay sau tên SKU
-            if pr:
-                price, i = pr
-                continue
         if not (t in AMBIGUOUS and name):
             p = parse_number(toks, i)
             if p:
@@ -113,14 +107,13 @@ def parse_transcript(text: str, catalog: Catalog) -> dict:
     for c in find_closings(norm):
         items_text, after = split_tail(c["tail"])
         items = []
-        for qty, words, price in scan_segments(items_text):
+        for qty, words in scan_segments(items_text):
             res = catalog.match(words)
             assumed = qty is None
             q = 1 if assumed else qty
-            need = res["conf"] < 0.85 or assumed or q == 0 or q > 200 or price_suspect(price)
+            need = res["conf"] < 0.85 or assumed or q == 0 or q > 200
             items.append({
                 "raw": " ".join(words), "qty": q, "qty_assumed": assumed,
-                "price": price, "price_missing": price is None,
                 **res, "need_confirm": need,
             })
         if not items:
@@ -132,6 +125,5 @@ def parse_transcript(text: str, catalog: Catalog) -> dict:
             "customer_confirm": confirm,
             "customer_evidence": evidence,
             "needs_review": any(i["need_confirm"] for i in items),
-            "missing_price": any(i["price_missing"] for i in items),
         })
     return {"closing_detected": bool(orders), "orders": orders}

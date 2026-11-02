@@ -102,7 +102,6 @@ class TextIn(BaseModel):
     sa_id: str = "sa01"
     sa_name: str = "SA Demo"
     store: str = ""
-    days_ago: int = 0  # chỉ để nạp dữ liệu mẫu nhiều ngày
 
 
 @app.post("/api/parse-text")
@@ -115,14 +114,11 @@ def parse_text(body: TextIn):
 def create_session_from_text(body: TextIn):
     """Tạo session từ transcript (để thử web Coach khi chưa có ASR)."""
     sid = uuid.uuid4().hex[:12]
-    ago = f"-{max(0, min(body.days_ago, 365))} days"
     db.execute(
-        "INSERT INTO sessions(id,sa_id,sa_name,store,status,transcript_text,created_at) "
-        "VALUES(?,?,?,?,'done',?,datetime('now',?))",
-        (sid, body.sa_id, body.sa_name, body.store, body.transcript, ago),
+        "INSERT INTO sessions(id,sa_id,sa_name,store,status,transcript_text) VALUES(?,?,?,?,'done',?)",
+        (sid, body.sa_id, body.sa_name, body.store, body.transcript),
     )
-    created = db.query("SELECT created_at FROM sessions WHERE id=?", (sid,))[0]["created_at"]
-    db.save_orders(sid, parse_transcript(body.transcript, catalog), created)
+    db.save_orders(sid, parse_transcript(body.transcript, catalog))
     return {"id": sid, "status": "done"}
 
 
@@ -130,8 +126,6 @@ def _orders(sid: str):
     rows = db.query("SELECT * FROM orders WHERE session_id=? ORDER BY id", (sid,))
     for r in rows:
         r["items"] = json.loads(r.pop("items_json"))
-        r["missing_price"] = sum(1 for i in r["items"] if i.get("price") is None)
-        r["total"] = sum(i["qty"] * i["price"] for i in r["items"] if i.get("price") is not None)
     return rows
 
 
@@ -154,18 +148,14 @@ def list_sessions(sa_id: str | None = None, status: str | None = None, limit: in
             [s["id"] for s in sessions])
         agg: dict[str, dict] = {}
         for r in rows:
-            a = agg.setdefault(r["session_id"], {"orders": 0, "units": 0, "confirm": [], "review": 0, "missing": 0, "revenue": 0})
+            a = agg.setdefault(r["session_id"], {"orders": 0, "units": 0, "confirm": [], "review": 0})
             a["orders"] += 1
-            its = json.loads(r["items_json"])
-            a["units"] += sum(i["qty"] for i in its)
-            a["revenue"] += sum(i["qty"] * i["price"] for i in its if i.get("price") is not None)
-            a["missing"] += any(i.get("price") is None for i in its)
+            a["units"] += sum(i["qty"] for i in json.loads(r["items_json"]))
             a["confirm"].append(r["customer_confirm"])
             a["review"] += bool(r["needs_review"]) and not r["reviewed"]
         for s in sessions:
-            a = agg.get(s["id"], {"orders": 0, "units": 0, "confirm": [], "review": 0, "missing": 0, "revenue": 0})
-            s.update(orders=a["orders"], units=a["units"], confirm=a["confirm"], pending_review=a["review"],
-                     missing_price=a["missing"], revenue=a["revenue"])
+            a = agg.get(s["id"], {"orders": 0, "units": 0, "confirm": [], "review": 0})
+            s.update(orders=a["orders"], units=a["units"], confirm=a["confirm"], pending_review=a["review"])
     return sessions
 
 
@@ -193,59 +183,27 @@ def get_audio(sid: str):
 class ItemFix(BaseModel):
     sku_id: str
     qty: int
-    price: int | None = None  # đơn giá (VND) / 1 đơn vị SKU; None = chưa có giá
 
 
-def _clean_items(items: list[ItemFix]) -> list[dict]:
-    if not items:
-        raise HTTPException(400, "empty order")
+@app.put("/api/orders/{order_id}/items")
+def fix_order(order_id: int, items: list[ItemFix]):
+    """SA/BA chạm sửa lại SKU/số lượng trên app."""
     fixed = []
     for it in items:
         if it.sku_id not in catalog.skus:
             raise HTTPException(400, f"unknown sku {it.sku_id}")
         if it.qty < 1 or it.qty > 999:
             raise HTTPException(400, "invalid qty")
-        if it.price is not None and not (0 <= it.price <= 50_000_000):
-            raise HTTPException(400, "invalid price")
         fixed.append({"sku_id": it.sku_id, "sku_name": catalog.skus[it.sku_id]["name"],
-                      "qty": it.qty, "price": it.price, "price_missing": it.price is None,
-                      "conf": 1.0, "need_confirm": False, "manual": True})
-    return fixed
-
-
-@app.put("/api/orders/{order_id}/items")
-def fix_order(order_id: int, items: list[ItemFix]):
-    """SA/BA chạm sửa lại SKU / số lượng / giá (hoặc bổ sung giá quên nói) trên app."""
-    if not db.query("SELECT 1 FROM orders WHERE id=?", (order_id,)):
-        raise HTTPException(404, "order not found")
-    fixed = _clean_items(items)
+                      "qty": it.qty, "conf": 1.0, "need_confirm": False, "manual": True})
     db.execute("UPDATE orders SET items_json=?, needs_review=0, reviewed=1 WHERE id=?",
                (json.dumps(fixed, ensure_ascii=False), order_id))
     return {"ok": True, "items": fixed}
 
 
-@app.post("/api/sessions/{sid}/orders")
-def add_order(sid: str, items: list[ItemFix]):
-    """SA/BA tự thêm đơn khi hệ thống không nghe thấy câu chốt đơn (đã được SA xác nhận)."""
-    if not db.query("SELECT 1 FROM sessions WHERE id=?", (sid,)):
-        raise HTTPException(404, "session not found")
-    fixed = _clean_items(items)
-    oid = db.execute(
-        "INSERT INTO orders(session_id,closing_text,customer_confirm,items_json,needs_review,reviewed) "
-        "VALUES(?,?,?,?,0,1)",
-        (sid, "(SA/BA nhập tay)", "yes", json.dumps(fixed, ensure_ascii=False)))
-    return {"ok": True, "id": oid, "items": fixed}
-
-
 @app.get("/api/stats/top-skus")
 def top_skus(days: int = 7, include_declined: bool = False):
     return stats.top_skus(days, include_declined)
-
-
-@app.get("/api/stats/skus")
-def sku_stats(days: int = 14):
-    """Xu hướng mua sắm theo SKU: số lượng, doanh thu, giá TB, theo từng ngày."""
-    return stats.sku_stats(days)
 
 
 @app.get("/api/stats/overview")

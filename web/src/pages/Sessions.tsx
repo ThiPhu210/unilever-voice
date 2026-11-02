@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtDur, fmtTime, SessionRow, Unauthorized, vnd } from "../api";
+import { api, fmtDur, fmtTime, SessionRow, Unauthorized } from "../api";
 
 const STATUS: Record<string, string> = { queued: "Đang chờ", processing: "Đang dịch", done: "Đã xong", error: "Lỗi" };
 const REPLY: Record<string, string> = { yes: "Khách đồng ý", no: "Khách từ chối", none: "Khách im lặng" };
@@ -8,8 +8,6 @@ const REPLY: Record<string, string> = { yes: "Khách đồng ý", no: "Khách t�
 export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [sa, setSa] = useState("");
-  const [q, setQ] = useState("");
-  const [todo, setTodo] = useState(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -24,12 +22,7 @@ export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
   }, []);
 
   const names = useMemo(() => Array.from(new Set(rows.map((r) => r.sa_name))), [rows]);
-  const k = q.trim().toLowerCase();
-  const shown = rows.filter((r) =>
-    (!sa || r.sa_name === sa) &&
-    (!k || `${r.store} ${r.sa_name}`.toLowerCase().includes(k)) &&
-    (!todo || r.pending_review > 0 || r.missing_price > 0));
-  const nTodo = rows.filter((r) => r.pending_review > 0 || r.missing_price > 0).length;
+  const shown = sa ? rows.filter((r) => r.sa_name === sa) : rows;
 
   return (
     <>
@@ -38,24 +31,17 @@ export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
           <h1>Cuộc hội thoại</h1>
           <p className="muted">Mở một cuộc để nghe lại và đọc nội dung.</p>
         </div>
-        <div className="filters">
-          <label className="pick">
-            <span>Tìm điểm bán</span>
-            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Tên cửa hàng hoặc SA/BA" />
-          </label>
-          <label className="pick">
-            <span>SA/BA</span>
-            <select value={sa} onChange={(e) => setSa(e.target.value)}>
-              <option value="">Tất cả SA/BA</option>
-              {names.map((s) => <option key={s}>{s}</option>)}
-            </select>
-          </label>
-          <label className="check"><input type="checkbox" checked={todo} onChange={(e) => setTodo(e.target.checked)} />Chỉ cuộc chờ SA xử lý ({nTodo})</label>
-        </div>
+        <label className="pick">
+          <span>Lọc theo</span>
+          <select value={sa} onChange={(e) => setSa(e.target.value)}>
+            <option value="">Tất cả SA/BA</option>
+            {names.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </label>
       </header>
       {err && <div className="err" role="alert">{err}</div>}
       <table className="tbl list">
-        <thead><tr><th>Thời gian</th><th>SA/BA</th><th className="n">Thời lượng</th><th>Xử lý</th><th>Đơn chốt</th><th className="n">Doanh thu</th><th>Phản hồi của khách</th><th /></tr></thead>
+        <thead><tr><th>Thời gian</th><th>SA/BA</th><th className="n">Thời lượng</th><th>Xử lý</th><th>Đơn chốt</th><th>Phản hồi của khách</th><th /></tr></thead>
         <tbody>
           {shown.map((r) => (
             <tr key={r.id}>
@@ -64,14 +50,12 @@ export default function Sessions({ onAuthError }: { onAuthError: () => void }) {
               <td className="n">{fmtDur(r.duration)}</td>
               <td><span className={`st st-${r.status}`}>{STATUS[r.status] || r.status}</span></td>
               <td>{r.orders ? `${r.orders} đơn, ${r.units} sản phẩm` : <span className="muted">Không có đơn</span>}
-                {r.pending_review > 0 && <small className="warn">Cần SA xác nhận SKU</small>}
-                {r.missing_price > 0 && <small className="warn">Thiếu giá, chờ SA bổ sung</small>}</td>
-              <td className="n">{r.revenue > 0 ? <b>{vnd(r.revenue)}</b> : <span className="muted">-</span>}</td>
+                {r.pending_review > 0 && <small className="warn">Cần SA xác nhận</small>}</td>
               <td>{r.confirm.length ? r.confirm.map((c, i) => <span key={i} className={`st r-${c}`}>{REPLY[c] || c}</span>) : <span className="muted">-</span>}</td>
               <td className="act"><Link to={`/sessions/${r.id}`}>Mở</Link></td>
             </tr>
           ))}
-          {shown.length === 0 && <tr><td colSpan={8} className="empty">{rows.length ? "Không có cuộc nào khớp bộ lọc." : "Chưa có cuộc hội thoại nào. Khi SA/BA ghi âm trên app, dữ liệu sẽ hiện ở đây."}</td></tr>}
+          {shown.length === 0 && <tr><td colSpan={7} className="empty">Chưa có cuộc hội thoại nào. Khi SA/BA ghi âm trên app, dữ liệu sẽ hiện ở đây.</td></tr>}
         </tbody>
       </table>
     </>

@@ -128,30 +128,3 @@ select { padding-right:34px; }
   .tbl { display:block; overflow-x:auto; }
   .login { grid-template-columns:1fr; } .login-brand { padding:32px 28px 20px; gap:18px; } .login-brand img { width:96px; } .login-brand h1 { font-size:40px; } .login-form { margin:0 10px 10px; padding:30px 20px; }
 }
-
-/* ---------- giá, doanh thu, sản phẩm ---------- */
-.facts.three { grid-template-columns:repeat(3,minmax(0,1fr)); max-width:760px; }
-.sub-h { margin:-10px 0 18px !important; } .sub-h a { color:var(--red); font-weight:600; text-underline-offset:4px; }
-.order th { text-align:left; font-weight:500; font-size:12.5px; color:var(--muted); padding:8px 0 6px; }
-.order th.q, .order th.p { text-align:right; }
-.order .q { width:46px; font-size:26px; }
-.order .p { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; padding-left:10px; }
-.order tfoot td { padding:12px 0 0; font-weight:600; border:0; }
-.order tfoot .p { font:700 28px var(--disp); }
-.miss { color:var(--red); font-weight:600; font-size:13px; }
-.filters { display:flex; gap:22px; align-items:flex-end; flex-wrap:wrap; }
-.filters input[type=search] { min-width:240px; }
-.check { display:flex; align-items:center; gap:9px; height:44px; font-size:14px; cursor:pointer; }
-.check input { height:18px; width:18px; accent-color:var(--red); }
-.chart-head { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:6px; }
-.chart-head h2 { margin-bottom:12px; }
-.tabs.small { gap:20px; } .tabs.small button { font-size:14px; }
-.chips { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 18px; }
-.chip { display:inline-flex; align-items:center; gap:8px; padding:7px 13px; background:#fff; border:1.5px solid var(--line); border-radius:99px; font:500 13.5px var(--body); color:var(--ink); cursor:pointer; }
-.chip i { width:10px; height:10px; border-radius:50%; }
-.chip.on { font-weight:600; border-width:2px; padding:6px 12px; }
-.chip:hover { background:var(--tint); }
-@media (max-width:860px) { .facts.three { grid-template-columns:1fr; } .filters { gap:14px; } .filters input[type=search] { min-width:0; width:100%; } .filters .pick { flex:1 1 100%; } }
-.facts dd i { white-space:nowrap; }
-.facts dd { white-space:nowrap; }
-.order thead th.q { width:auto; font:500 12.5px var(--body); }
