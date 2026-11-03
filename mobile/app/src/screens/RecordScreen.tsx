@@ -30,7 +30,7 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
 
   useEffect(() => {
     pendingCount().then(setPending);
-    enqueueAndFlush(settings).then((r) => setPending(r.left)).catch(() => {}); // thử gửi lại các bản tồn
+    enqueueAndFlush(settings).then((r) => { setPending(r.left); if (r.error) setResult({ kind: "error", text: r.error }); }).catch(() => {}); // thử gửi lại các bản tồn
   }, [settings]);
 
   // Sóng âm: dB (-60..0) -> 0..1
@@ -69,11 +69,11 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
       const uri = recorder.uri;
       if (!restart) deactivateKeepAwake("rec");
       if (uri) {
-        const { left, ids } = await enqueueAndFlush(settings, uri);
+        const { left, ids, error } = await enqueueAndFlush(settings, uri);
         setPending(left);
         const id = ids[ids.length - 1];
         setResult(left
-          ? { kind: "queued", text: `Đã lưu trên máy. ${left} bản chờ gửi (mất mạng?). App sẽ tự gửi lại.` }
+          ? { kind: "queued", text: `Đã lưu trên máy. ${left} bản chờ gửi. ${error ?? ""}` }
           : { kind: "sent", text: "Đã gửi lên server. Hệ thống đang dịch giọng nói." });
         onUploaded(!restart && !left ? id : undefined); // gửi xong -> mở thẳng màn xác nhận đơn
       }
@@ -137,7 +137,11 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
         <Card tone="warn">
           <Text style={{ color: C.amber, fontWeight: "700" }}>{pending} bản ghi đang chờ gửi</Text>
           <Button kind="ghost" label="Gửi lại ngay" style={{ marginTop: 10 }}
-            onPress={() => enqueueAndFlush(settings).then((r) => { setPending(r.left); if (r.ids.length) onUploaded(r.ids[r.ids.length - 1]); }).catch(() => {})} />
+            onPress={() => enqueueAndFlush(settings).then((r) => {
+              setPending(r.left);
+              setResult(r.error ? { kind: "error", text: r.error } : { kind: "sent", text: "Đã gửi xong các bản đang chờ." });
+              if (r.ids.length) onUploaded(r.ids[r.ids.length - 1]);
+            }).catch((e) => setResult({ kind: "error", text: String(e?.message || e) }))} />
         </Card>
       )}
 

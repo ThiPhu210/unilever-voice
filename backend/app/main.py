@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,7 @@ AUDIO_DIR = os.getenv("AUDIO_DIR", "data/audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 db.init()
 catalog = Catalog()
+db.sync_skus(catalog.skus, catalog.rows)
 _asr_lock = threading.Semaphore(1)  # chỉ chạy 1 phiên ASR một lúc để không tràn RAM
 
 
@@ -67,7 +69,7 @@ def _process(session_id: str):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "skus": len(catalog.skus)}
+    return {"ok": True, "skus": len(catalog.skus), "db": "postgres" if db.IS_PG else "sqlite"}
 
 
 @app.get("/api/catalog")
@@ -90,8 +92,8 @@ async def create_session(
         while chunk := await audio.read(1024 * 1024):
             f.write(chunk)
     db.execute(
-        "INSERT INTO sessions(id,sa_id,sa_name,store,audio_path,status) VALUES(?,?,?,?,?,'queued')",
-        (sid, sa_id, sa_name, store, path),
+        "INSERT INTO sessions(id,sa_id,sa_name,store,audio_path,status,created_at) VALUES(?,?,?,?,?,'queued',?)",
+        (sid, sa_id, sa_name, store, path, db.now_str()),
     )
     background.add_task(_process, sid)
     return {"id": sid, "status": "queued"}
@@ -115,13 +117,12 @@ def parse_text(body: TextIn):
 def create_session_from_text(body: TextIn):
     """Tạo session từ transcript (để thử web Coach khi chưa có ASR)."""
     sid = uuid.uuid4().hex[:12]
-    ago = f"-{max(0, min(body.days_ago, 365))} days"
+    created = (datetime.now(timezone.utc) - timedelta(days=max(0, min(body.days_ago, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute(
         "INSERT INTO sessions(id,sa_id,sa_name,store,status,transcript_text,created_at) "
-        "VALUES(?,?,?,?,'done',?,datetime('now',?))",
-        (sid, body.sa_id, body.sa_name, body.store, body.transcript, ago),
+        "VALUES(?,?,?,?,'done',?,?)",
+        (sid, body.sa_id, body.sa_name, body.store, body.transcript, created),
     )
-    created = db.query("SELECT created_at FROM sessions WHERE id=?", (sid,))[0]["created_at"]
     db.save_orders(sid, parse_transcript(body.transcript, catalog), created)
     return {"id": sid, "status": "done"}
 
@@ -145,7 +146,7 @@ def list_sessions(sa_id: str | None = None, status: str | None = None, limit: in
     sql = "SELECT id,sa_id,sa_name,store,created_at,duration,status FROM sessions"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
     sessions = db.query(sql, args + [limit])
     if sessions:
         ph = ",".join("?" * len(sessions))
@@ -231,9 +232,9 @@ def add_order(sid: str, items: list[ItemFix]):
         raise HTTPException(404, "session not found")
     fixed = _clean_items(items)
     oid = db.execute(
-        "INSERT INTO orders(session_id,closing_text,customer_confirm,items_json,needs_review,reviewed) "
-        "VALUES(?,?,?,?,0,1)",
-        (sid, "(SA/BA nhập tay)", "yes", json.dumps(fixed, ensure_ascii=False)))
+        "INSERT INTO orders(session_id,closing_text,customer_confirm,items_json,needs_review,reviewed,created_at) "
+        "VALUES(?,?,?,?,0,1,?)",
+        (sid, "(SA/BA nhập tay)", "yes", json.dumps(fixed, ensure_ascii=False), db.now_str()))
     return {"ok": True, "id": oid, "items": fixed}
 
 

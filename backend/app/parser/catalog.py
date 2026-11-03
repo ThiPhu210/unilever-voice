@@ -11,9 +11,11 @@ class Catalog:
             os.path.join(os.path.dirname(__file__), "..", "..", "data", "sku_catalog.csv"),
         )
         self.skus: dict[str, dict] = {}
+        self.rows: list[dict] = []
         self.index: list[tuple[str, str, str | None]] = []  # (sku_id, alias_words, alias_size)
         with open(path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                self.rows.append(row)
                 self.skus[row["sku_id"]] = {
                     "sku_id": row["sku_id"], "name": row["name"], "unit": row["unit"],
                 }

@@ -5,3 +5,5 @@ rapidfuzz==3.*
 faster-whisper==1.*
 pytest
 httpx
+psycopg[binary,pool]==3.2.*
+openpyxl

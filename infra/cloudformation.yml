@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Unilever Voice Coach demo - 1 EC2 (Docker) + ECR + GitHub OIDC deploy role (SSM, khong can SSH).
+  Unilever Voice Coach demo - 1 EC2 (Docker) + RDS PostgreSQL + ECR + GitHub OIDC deploy role (SSM, khong can SSH).
 
 Parameters:
   GitHubRepo:
@@ -39,6 +39,27 @@ Parameters:
     Default: "true"
     AllowedValues: ["true", "false"]
     Description: 'Dat false neu tai khoan AWS cua ban DA co OIDC provider token.actions.githubusercontent.com'
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC se dat EC2 va database (thuong la default VPC)
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Chon it nhat 2 subnet o 2 AZ khac nhau trong VPC tren (subnet dau tien se chua EC2)
+  DbPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    AllowedPattern: "^[A-Za-z0-9]+$"
+    Description: Mat khau Postgres (>=16 ky tu, chi chu va so de khong can ma hoa URL)
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: Loai may RDS (db.t4g.micro ~ re nhat, du cho demo; nang len db.t4g.small/medium khi dung that)
+  DbStorageGb:
+    Type: Number
+    Default: 20
+    MinValue: 20
 
 Conditions:
   CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, "true"]
@@ -150,9 +171,47 @@ Resources:
     Properties:
       Roles: [!Ref InstanceRole]
 
+  # ---------- Database (RDS PostgreSQL, khong public, chi EC2 vao duoc) ----------
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Voice Coach database
+      SubnetIds: !Ref SubnetIds
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Postgres - chi cho phep tu EC2 cua app
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !GetAtt SecurityGroup.GroupId}
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbStorageGb
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: voicecoach
+      MasterUsername: voiceadmin
+      MasterUserPassword: !Ref DbPassword
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!GetAtt DbSecurityGroup.GroupId]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: true
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - {Key: App, Value: unilever-voice}
+
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
+      VpcId: !Ref VpcId
       GroupDescription: Voice Coach web (80/443). Khong mo SSH - quan tri qua SSM.
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: !Ref AllowedCidr}
@@ -164,6 +223,7 @@ Resources:
       ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Select [0, !Ref SubnetIds]
       SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
       MetadataOptions: {HttpTokens: required}
       BlockDeviceMappings:
@@ -184,6 +244,7 @@ Resources:
           mkdir -p /opt/app
           cat > /opt/app/.env <<'ENVEOF'
           API_KEY=${ApiKey}
+          DATABASE_URL=postgresql://voiceadmin:${DbPassword}@${Database.Endpoint.Address}:5432/voicecoach
           ASR_MODEL=${AsrModel}
           SITE_ADDRESS=${SiteAddress}
           ENVEOF
@@ -207,3 +268,6 @@ Outputs:
     Value: !Ref ElasticIp
   InstanceId:
     Value: !Ref Instance
+  DbEndpoint:
+    Description: Dia chi Postgres (chi truy cap duoc tu EC2 / qua SSM port-forward)
+    Value: !GetAtt Database.Endpoint.Address

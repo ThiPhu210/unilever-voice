@@ -1,12 +1,25 @@
-# Chạy thử toàn bộ trên máy bạn:  docker compose up --build   -> http://localhost:8080
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: voice
+      POSTGRES_PASSWORD: voicedev
+      POSTGRES_DB: voicecoach
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voice -d voicecoach"]
+      interval: 5s
+      retries: 10
   api:
     build: ./backend
     environment:
       API_KEY: devkey1234567890
       ASR_MODEL: small
       PRELOAD_ASR: "0"
+      DATABASE_URL: postgresql://voice:voicedev@db:5432/voicecoach
     volumes: [appdata:/data]
+    depends_on:
+      db: {condition: service_healthy}
   web:
     build: ./web
     environment:
@@ -15,3 +28,4 @@ services:
     depends_on: [api]
 volumes:
   appdata:
+  pgdata:
