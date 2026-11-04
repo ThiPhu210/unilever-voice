@@ -106,10 +106,11 @@ def test_parse_turns_nhieu_don():
     assert [o["customer_confirm"] for o in r["orders"]] == ["yes", "no"]
 
 
-def test_parse_turns_khong_co_luot_khach_dung_cach_cu():
+def test_parse_turns_khong_co_luot_khach_la_chua_ro():
+    # chỉ có lượt SA: lời SA "dạ đúng rồi em" KHÔNG được tính là khách đồng ý
     t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Dạ đúng rồi em."))
     o = parse_transcript("", main.catalog, t)["orders"][0]
-    assert o["customer_confirm"] == "yes" and o["confirm_source"] == "text"
+    assert o["customer_confirm"] == "none" and o["confirm_source"] == "no_customer_turn"
 
 
 def test_parse_turns_nhan_sai_thi_quay_ve_toan_van():
