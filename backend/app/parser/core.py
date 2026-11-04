@@ -10,7 +10,7 @@ from .catalog import Catalog
 from .prices import parse_price, price_suspect
 from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE, CONFIRM_CUT
 
-SEPARATORS = {",", ";", "voi", "cong", "them"}
+SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
              "bich", "hu", "bo", "lo", "can", "bao", "vi"}
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
@@ -78,6 +78,8 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     while i < n:
         t = toks[i]
         if t in SEPARATORS:
+            if t in {"va", "voi"} and price is None and not _starts_item(toks, i):
+                name.append(t); i += 1; continue
             flush(); i += 1; continue
         m = SIZE_RE.match(t)
         if m:
@@ -107,6 +109,12 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     flush()
     return segs
 
+def _starts_item(toks: list[str], i: int) -> bool:
+    """toks[i] là 'va'/'voi': sau nó có phải số lượng của một dòng mới không?"""
+    j = i + 1
+    while j < len(toks) and toks[j] in LEAD_STRIP:
+        j += 1
+    return j < len(toks) and parse_number(toks, j) is not None
 
 def _build_order(items_text: str, after: str, catalog: Catalog, source: str = "text") -> dict | None:
     """Dựng một đơn từ phần liệt kê SKU + phần phản hồi của khách.
