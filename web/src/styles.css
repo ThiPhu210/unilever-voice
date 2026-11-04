@@ -88,6 +88,8 @@ select { padding-right:34px; }
 .tx time { font:600 17px var(--disp); color:var(--muted); font-variant-numeric:tabular-nums; }
 .tx .active button { background:var(--tint); border-left-color:var(--frame); }
 .tx .closing button { background:#FFF4F1; border-left-color:var(--red); }
+.tx .spk { display:inline-block; margin-right:8px; padding:1px 8px; border-radius:99px; font:700 12px var(--disp); background:var(--tint); color:var(--frame); }
+.tx .spk.customer { background:#E8F4EC; color:#2E7D4F; }
 .tx em { display:block; margin-top:3px; font-style:normal; font-weight:600; font-size:13px; color:var(--red); }
 .plain-tx { line-height:1.7; max-width:68ch; }
 .side-col h2:not(:first-child) { margin-top:44px; }

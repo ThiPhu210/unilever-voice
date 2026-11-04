@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import db, stats
+from . import db, speaker, stats
 from .coaching import analyze
 from .parser import Catalog, parse_transcript
 
@@ -55,12 +55,22 @@ def _process(session_id: str):
         try:
             from . import asr
             db.execute("UPDATE sessions SET status='processing' WHERE id=?", (session_id,))
-            s = db.query("SELECT audio_path FROM sessions WHERE id=?", (session_id,))[0]
+            s = db.query("SELECT audio_path, sa_id FROM sessions WHERE id=?", (session_id,))[0]
             r = asr.transcribe(s["audio_path"], catalog.hotwords())
-            parsed = parse_transcript(r["text"], catalog)
+            segments, turns = r["segments"], None
+            vp = db.query("SELECT embedding_json FROM voiceprints WHERE sa_id=?", (s["sa_id"],))
+            if vp:  # SA đã đăng ký giọng -> tách lượt nói SA / khách
+                try:
+                    d = speaker.diarize(s["audio_path"], r.get("words", []), json.loads(vp[0]["embedding_json"]))
+                    if d["turns"]:
+                        turns = d["turns"]
+                        segments = [{k: t[k] for k in ("start", "end", "speaker", "score")} | {"text": t["text"]} for t in turns]
+                except Exception as e:  # noqa - lỗi nhận diện giọng không được làm hỏng cả phiên: dùng cách cũ
+                    print("diarize failed:", e)
+            parsed = parse_transcript(r["text"], catalog, turns)
             db.execute(
                 "UPDATE sessions SET transcript_text=?, segments_json=?, duration=?, status='done' WHERE id=?",
-                (r["text"], json.dumps(r["segments"], ensure_ascii=False), r["duration"], session_id),
+                (r["text"], json.dumps(segments, ensure_ascii=False), r["duration"], session_id),
             )
             db.save_orders(session_id, parsed)
         except Exception as e:  # noqa
@@ -179,7 +189,9 @@ def get_session(sid: str):
     s["segments"] = json.loads(s.pop("segments_json") or "[]")
     s["has_audio"] = bool(s.pop("audio_path", None))
     s["orders"] = _orders(sid)
-    s["coaching"] = analyze(s.get("transcript_text") or "")
+    sp = speaker.split_text(s["segments"])  # đã tách người nói: chấm SA theo lời SA, lý do từ chối theo lời khách
+    s["diarized"] = sp is not None
+    s["coaching"] = analyze(s.get("transcript_text") or "", *(sp or (None, None)))
     return s
 
 
@@ -236,6 +248,64 @@ def add_order(sid: str, items: list[ItemFix]):
         "VALUES(?,?,?,?,0,1,?)",
         (sid, "(SA/BA nhập tay)", "yes", json.dumps(fixed, ensure_ascii=False), db.now_str()))
     return {"ok": True, "id": oid, "items": fixed}
+
+
+# ---------- Đăng ký giọng nói SA ----------
+@app.get("/api/voiceprints/{sa_id}")
+def voiceprint_status(sa_id: str):
+    r = db.query("SELECT n_samples, consent_at, updated_at FROM voiceprints WHERE sa_id=?", (sa_id,))
+    return {"enrolled": bool(r), **(r[0] if r else {})}
+
+
+@app.post("/api/voiceprints/{sa_id}")
+async def enroll_voiceprint(
+    sa_id: str,
+    audio: list[UploadFile] = File(...),
+    consent: bool = Form(False),
+    replace: bool = Form(False),
+):
+    """SA ghi 2-3 đoạn đọc mẫu (tổng >= 8s có tiếng) -> lưu dấu giọng. Không lưu file âm thanh."""
+    if not consent:
+        raise HTTPException(400, "Cần SA đồng ý (consent=true) trước khi lưu dấu giọng")
+    if db.query("SELECT 1 FROM voiceprints WHERE sa_id=?", (sa_id,)) and not replace:
+        raise HTTPException(409, "SA này đã đăng ký giọng; gửi replace=true để đăng ký lại")
+    if len(audio) > 6:
+        raise HTTPException(400, "Tối đa 6 đoạn ghi")
+    import tempfile
+    clips = []
+    for f in audio:
+        ext = os.path.splitext(f.filename or "")[1] or ".m4a"
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=True) as tmp:
+            total = 0
+            while chunk := await f.read(1024 * 1024):
+                total += len(chunk)
+                if total > 20 * 1024 * 1024:
+                    raise HTTPException(413, "File quá lớn")
+                tmp.write(chunk)
+            tmp.flush()
+            try:
+                clips.append(speaker.load_audio(tmp.name))
+            except Exception:
+                raise HTTPException(400, "Không đọc được file âm thanh")
+    try:
+        r = speaker.enroll_from_clips(clips)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    now = db.now_str()
+    db.execute(
+        "INSERT INTO voiceprints(sa_id,embedding_json,dim,model,n_samples,consent_at,updated_at) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(sa_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, model=excluded.model, "
+        "n_samples=excluded.n_samples, consent_at=excluded.consent_at, updated_at=excluded.updated_at",
+        (sa_id, json.dumps(r["embedding"]), len(r["embedding"]), os.path.basename(speaker.MODEL_PATH),
+         r["n_samples"], now, now))
+    return {"ok": True, "n_samples": r["n_samples"], "voiced_seconds": r["voiced_seconds"], "consistency": r["consistency"]}
+
+
+@app.delete("/api/voiceprints/{sa_id}")
+def delete_voiceprint(sa_id: str):
+    """SA rút lại đồng ý -> xoá dấu giọng."""
+    db.execute("DELETE FROM voiceprints WHERE sa_id=?", (sa_id,))
+    return {"ok": True}
 
 
 @app.get("/api/stats/top-skus")

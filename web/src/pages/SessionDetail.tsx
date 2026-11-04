@@ -62,7 +62,7 @@ export default function SessionDetailPage({ onAuthError }: { onAuthError: () => 
                   <li key={i} className={`${active ? "active" : ""} ${closing ? "closing" : ""}`}>
                     <button onClick={() => seek(g.start)}>
                       <time>{fmtDur(g.start)}</time>
-                      <span>{g.text}{closing && <em>Câu chốt đơn</em>}</span>
+                      <span>{g.speaker && <b className={`spk ${g.speaker}`}>{g.speaker === "sa" ? "SA" : "Khách"}</b>}{g.text}{closing && <em>Câu chốt đơn</em>}</span>
                     </button>
                   </li>
                 );

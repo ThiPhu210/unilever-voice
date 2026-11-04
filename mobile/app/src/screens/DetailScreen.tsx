@@ -239,7 +239,13 @@ export default function DetailScreen({ settings, id, onBack }: { settings: Setti
                   <Text style={st.oTitle}>Transcript cuộc tư vấn</Text>
                   <Text style={st.link}>{showTx ? "Thu gọn" : "Xem"}</Text>
                 </TouchableOpacity>
-                {showTx && <Text style={st.tx}>{s.transcript_text}</Text>}
+                {showTx && ((s as any).segments?.some((g: any) => g.speaker)
+                  ? (s as any).segments.map((g: any, i: number) => (
+                      <Text key={i} style={st.tx}>
+                        <Text style={{ fontWeight: "800", color: g.speaker === "sa" ? C.brand : C.green }}>{g.speaker === "sa" ? "SA: " : "Khách: "}</Text>
+                        {g.text}
+                      </Text>))
+                  : <Text style={st.tx}>{s.transcript_text}</Text>)}
               </Card>
             )}
           </>

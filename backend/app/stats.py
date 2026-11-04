@@ -3,7 +3,7 @@ import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from . import db
+from . import db, speaker
 from .coaching import OBJECTIONS, analyze
 
 TZ_HOURS = int(os.getenv("TZ_OFFSET_HOURS", "7"))  # Việt Nam UTC+7
@@ -73,7 +73,7 @@ def sku_stats(days: int = 14) -> dict:
 def overview(days: int = 7) -> dict:
     since = _since(days)
     sessions = db.query(
-        "SELECT id, sa_id, sa_name, created_at, transcript_text FROM sessions WHERE created_at>=?", (since,))
+        "SELECT id, sa_id, sa_name, created_at, transcript_text, segments_json FROM sessions WHERE created_at>=?", (since,))
     orders = db.query(
         "SELECT o.*, s.sa_id, s.sa_name FROM orders o JOIN sessions s ON s.id=o.session_id WHERE o.created_at>=?",
         (since,))
@@ -89,7 +89,8 @@ def overview(days: int = 7) -> dict:
         sa = by_sa[(s["sa_id"], s["sa_name"])]
         sa["sessions"] += 1
         if s["transcript_text"]:
-            a = analyze(s["transcript_text"])
+            sp = speaker.split_text(json.loads(s.get("segments_json") or "[]"))
+            a = analyze(s["transcript_text"], *(sp or (None, None)))
             scores.append(a["score"])
             sa["scores"].append(a["score"])
             for o in a["objections"]:

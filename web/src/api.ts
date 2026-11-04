@@ -30,7 +30,7 @@ export type SessionRow = {
   duration: number | null; status: string; orders: number; units: number;
   confirm: string[]; pending_review: number; missing_price: number; revenue: number;
 };
-export type Segment = { start: number; end: number; text: string };
+export type Segment = { start: number; end: number; text: string; speaker?: "sa" | "customer" };
 export type SessionDetail = SessionRow & {
   transcript_text: string; segments: Segment[]; has_audio: boolean; orders: Order[]; error?: string;
   coaching: { score: number; checklist: { key: string; label: string; passed: boolean }[]; objections: string[] };

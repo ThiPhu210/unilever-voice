@@ -1,4 +1,5 @@
 import { CatalogItem, LineIn, SessionDetail, SessionRow, Settings } from "./types";
+import * as FileSystem from "expo-file-system/legacy";
 import { getQueue, Pending, setQueue } from "./storage";
 
 async function req<T>(s: Settings, path: string, init: RequestInit = {}): Promise<T> {
@@ -32,19 +33,19 @@ export const addOrder = (s: Settings, sessionId: string, items: LineIn[]) =>
   });
 
 async function uploadOne(s: Settings, p: Pending): Promise<string> {
-  const form = new FormData();
-  form.append("audio", { uri: p.uri, name: `rec-${p.createdAt}.m4a`, type: "audio/m4a" } as any);
-  form.append("sa_id", p.saId);
-  form.append("sa_name", p.saName);
-  form.append("store", p.store);
-  const res = await fetch(s.server + "/api/sessions", {
-    method: "POST",
+  // Không dùng FormData + {uri,name,type}: fetch của Expo SDK mới báo "Unsupported FormDataPart implementation".
+  // uploadAsync gửi multipart trực tiếp từ file trên máy (không nạp cả file vào RAM).
+  const res = await FileSystem.uploadAsync(s.server + "/api/sessions", p.uri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: "audio",
+    mimeType: "audio/m4a",
     headers: { "x-api-key": s.apiKey },
-    body: form,
+    parameters: { sa_id: p.saId, sa_name: p.saName, store: p.store },
   });
   if (res.status === 401) throw new Error("API key không đúng (vào Cài đặt kiểm tra lại)");
-  if (!res.ok) throw new Error(`Server trả lỗi ${res.status}`);
-  return (await res.json()).id as string;
+  if (res.status < 200 || res.status >= 300) throw new Error(`Server trả lỗi ${res.status}`);
+  return JSON.parse(res.body).id as string;
 }
 
 /** Thêm bản ghi vào hàng đợi rồi thử gửi toàn bộ. Trả về số bản còn tồn + id các cuộc vừa gửi được. */

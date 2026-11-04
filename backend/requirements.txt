@@ -7,3 +7,5 @@ pytest
 httpx
 psycopg[binary,pool]==3.2.*
 openpyxl
+sherpa-onnx
+numpy

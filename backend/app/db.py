@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS staff(
     sr_ess_code TEXT REFERENCES supervisors(ess_code), updated_at TEXT);
 CREATE INDEX IF NOT EXISTS idx_staff_ba ON staff(ba_code);
 CREATE INDEX IF NOT EXISTS idx_staff_store ON staff(store_code);
+
+-- Dấu giọng SA (vector embedding, KHÔNG lưu âm thanh). Dữ liệu sinh trắc học: chỉ lưu khi SA đã đồng ý (consent_at).
+CREATE TABLE IF NOT EXISTS voiceprints(
+    sa_id TEXT PRIMARY KEY, embedding_json TEXT NOT NULL, dim INTEGER, model TEXT,
+    n_samples INTEGER, consent_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 """
 
 

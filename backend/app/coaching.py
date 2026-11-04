@@ -18,11 +18,13 @@ OBJECTIONS = {
 }
 
 
-def analyze(text: str) -> dict:
-    n = normalize(text or "")
+def analyze(text: str, sa_text: str | None = None, customer_text: str | None = None) -> dict:
+    """Nếu đã tách người nói: checklist chấm trên lời SA, lý do từ chối bắt từ lời KHÁCH."""
+    n = normalize(sa_text if sa_text is not None else (text or ""))
+    n_obj = normalize(customer_text) if customer_text is not None else n
     checklist = [{"key": k, "label": lbl, "passed": bool(re.search(rx, n))} for k, lbl, rx in CHECKS]
     checklist.append({"key": "closing_template", "label": "Dùng đúng câu chốt đơn mẫu",
                       "passed": bool(re.search(CLOSING_TEMPLATE, n))})
     score = round(100 * sum(c["passed"] for c in checklist) / len(checklist))
-    objections = [k for k, (_, rx) in OBJECTIONS.items() if re.search(rx, n)]
+    objections = [k for k, (_, rx) in OBJECTIONS.items() if re.search(rx, n_obj)]
     return {"checklist": checklist, "score": score, "objections": objections}
