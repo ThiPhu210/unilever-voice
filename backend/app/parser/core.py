@@ -108,7 +108,9 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     return segs
 
 
-def _build_order(items_text: str, after: str, catalog: Catalog) -> dict | None:
+def _build_order(items_text: str, after: str, catalog: Catalog, source: str = "text") -> dict | None:
+    """Dựng một đơn từ phần liệt kê SKU + phần phản hồi của khách.
+    source: 'customer_turn' (phản hồi lấy từ lượt KHÁCH) hoặc 'text' (cắt từ đuôi cùng lượt/toàn văn)."""
     items = []
     for qty, words, price in scan_segments(items_text):
         res = catalog.match(words)
@@ -128,6 +130,7 @@ def _build_order(items_text: str, after: str, catalog: Catalog) -> dict | None:
         "items": items,
         "customer_confirm": confirm,
         "customer_evidence": evidence,
+        "confirm_source": source,
         "needs_review": any(i["need_confirm"] for i in items),
         "missing_price": any(i["price_missing"] for i in items),
     }
@@ -150,9 +153,11 @@ def _orders_from_turns(turns: list[dict], catalog: Catalog) -> list[dict]:
         cust_norm = normalize(" ".join(cust))
         for idx, c in enumerate(closings):
             items_text, after = split_tail(c["tail"])
+            source = "text"
             if idx == len(closings) - 1 and cust_norm:
-                after = cust_norm  # lời SA sau câu chốt ("chị lấy thêm gì không ạ") không tính là phản hồi
-            o = _build_order(items_text, after, catalog)
+                # lời SA sau câu chốt ("chị lấy thêm gì không ạ") không tính là phản hồi của khách
+                after, source = cust_norm, "customer_turn"
+            o = _build_order(items_text, after, catalog, source)
             if o:
                 orders.append(o)
     return orders
