@@ -108,31 +108,62 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     return segs
 
 
-def parse_transcript(text: str, catalog: Catalog) -> dict:
-    norm = normalize(text)
-    orders = []
-    for c in find_closings(norm):
-        items_text, after = split_tail(c["tail"])
-        items = []
-        for qty, words, price in scan_segments(items_text):
-            res = catalog.match(words)
-            assumed = qty is None
-            q = 1 if assumed else qty
-            need = res["conf"] < 0.85 or assumed or q == 0 or q > 200 or price_suspect(price)
-            items.append({
-                "raw": " ".join(words), "qty": q, "qty_assumed": assumed,
-                "price": price, "price_missing": price is None,
-                **res, "need_confirm": need,
-            })
-        if not items:
-            continue
-        confirm, evidence = detect_customer_confirm(after)
-        orders.append({
-            "closing_text": items_text.strip(),
-            "items": items,
-            "customer_confirm": confirm,
-            "customer_evidence": evidence,
-            "needs_review": any(i["need_confirm"] for i in items),
-            "missing_price": any(i["price_missing"] for i in items),
+def _build_order(items_text: str, after: str, catalog: Catalog) -> dict | None:
+    items = []
+    for qty, words, price in scan_segments(items_text):
+        res = catalog.match(words)
+        assumed = qty is None
+        q = 1 if assumed else qty
+        need = res["conf"] < 0.85 or assumed or q == 0 or q > 200 or price_suspect(price)
+        items.append({
+            "raw": " ".join(words), "qty": q, "qty_assumed": assumed,
+            "price": price, "price_missing": price is None,
+            **res, "need_confirm": need,
         })
+    if not items:
+        return None
+    confirm, evidence = detect_customer_confirm(after)
+    return {
+        "closing_text": items_text.strip(),
+        "items": items,
+        "customer_confirm": confirm,
+        "customer_evidence": evidence,
+        "needs_review": any(i["need_confirm"] for i in items),
+        "missing_price": any(i["price_missing"] for i in items),
+    }
+
+
+def _orders_from_turns(turns: list[dict], catalog: Catalog) -> list[dict]:
+    """Câu chốt chỉ tìm trong lượt SA; phản hồi lấy từ lượt KHÁCH ngay sau đó.
+    Không có lượt khách liền sau -> dùng phần đuôi cùng lượt (cách cũ)."""
+    orders = []
+    for k, t in enumerate(turns):
+        if t.get("speaker") != "sa":
+            continue
+        closings = find_closings(normalize(t.get("text", "")))
+        if not closings:
+            continue
+        cust, j = [], k + 1
+        while j < len(turns) and turns[j].get("speaker") == "customer":
+            cust.append(turns[j].get("text", ""))
+            j += 1
+        cust_norm = normalize(" ".join(cust))
+        for idx, c in enumerate(closings):
+            items_text, after = split_tail(c["tail"])
+            if idx == len(closings) - 1 and cust_norm:
+                after = cust_norm  # lời SA sau câu chốt ("chị lấy thêm gì không ạ") không tính là phản hồi
+            o = _build_order(items_text, after, catalog)
+            if o:
+                orders.append(o)
+    return orders
+
+
+def parse_transcript(text: str, catalog: Catalog, turns: list[dict] | None = None) -> dict:
+    orders = _orders_from_turns(turns, catalog) if turns else []
+    if not orders:  # không có turns, hoặc không thấy câu chốt trong lời SA -> quay về toàn văn
+        for c in find_closings(normalize(text)):
+            items_text, after = split_tail(c["tail"])
+            o = _build_order(items_text, after, catalog)
+            if o:
+                orders.append(o)
     return {"closing_detected": bool(orders), "orders": orders}
