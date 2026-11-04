@@ -8,6 +8,7 @@ from .numbers import parse_number
 from .tokens import TOKEN_RE, SIZE_RE, SIZE_UNIT_MAP, size_norm
 from .catalog import Catalog
 from .prices import parse_price, price_suspect
+from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE, CONFIRM_CUT
 
 SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
@@ -16,10 +17,8 @@ STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
              "cai", "x", "la", "don", "gia", "moi", "tien", "dong", "vnd", "d"}
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
 AMBIGUOUS = {"nam", "sau"}  # vừa là số vừa là từ thường (clear nam, ...)
+BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
 CLOSE_PREV = {"minh", "vay", "em", "nhe", "la", "se", "luon", "anh", "chi", "con"}
-CONFIRM_CUT = re.compile(r"\b(da dung|dung roi|duoc roi|ok|oke|thoi)\b")
-YES_RE = re.compile(r"\b(dung roi|duoc roi|ok|oke|okay|dong y|vang|u|uh|uhm|dung|chuan|duoc|lay)\b")
-NO_RE = re.compile(r"\b(thoi|khong|ko|chua|de (anh |chi |co |chu |minh )?(suy nghi|xem)|khoan|huy|bo bot)\b")
 SENT_END = re.compile(r"[.?!](?=\s|$)")
 
 
@@ -55,7 +54,7 @@ def split_tail(tail: str) -> tuple[str, str]:
 
 def detect_customer_confirm(after: str) -> tuple[str, str | None]:
     after = " ".join(after.split()[:25])
-    after = re.sub(r"\bkhong (sao|van de|co gi)\b", "ok", after)
+    after = YES_OVERRIDE_RE.sub("ok", after)  # "không sao", "thôi được", "cũng được"... = đồng ý
     y, n = YES_RE.search(after), NO_RE.search(after)
     if y and (not n or y.start() < n.start()):
         return "yes", y.group()
@@ -90,6 +89,8 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             if pr:
                 price, i = pr
                 continue
+        if t == "tam" and name and name[-1] in BATH_PREV:
+            name.append(t); i += 1; continue
         if not (t in AMBIGUOUS and name):
             p = parse_number(toks, i)
             if p:
