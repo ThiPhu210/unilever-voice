@@ -1,13 +1,13 @@
 """Đọc giá SKU trong câu chốt đơn: "65 nghìn đồng", "65k", "65.000đ", "sáu mươi lăm nghìn",
-"một trăm hai mươi nghìn", "sáu mươi lăm nghìn rưỡi". Trả về VND (số nguyên).
+"mười lăm nghìn", "một trăm hai mươi nghìn", "sáu mươi lăm nghìn rưỡi". Trả về VND (số nguyên).
 Chỉ nhận là giá khi có đơn vị tiền (nghìn/ngàn/k/đồng/triệu) hoặc là số >= 1000,
 để không nhầm với số lượng ("2 omo 800g, 1 clear ...")."""
 import re
 from .numbers import parse_number
 
-THOUSAND = {"nghin", "ngan", "k"}
+THOUSAND = {"nghin", "ngan", "ng", "k", "nghìn", "ngàn"}
 MILLION = {"trieu", "tr"}
-CURRENCY = {"dong", "d", "vnd"}
+CURRENCY = {"dong", "d", "vnd", "viet nam dong"}
 UNITS = THOUSAND | MILLION | CURRENCY
 NUM_TOKEN = re.compile(r"^(\d+(?:[.,]\d+)?)([a-z]*)$")
 GROUPED = re.compile(r"^\d{1,3}(?:[.,]\d{3})+$")  # 65.000 / 1,250,000
