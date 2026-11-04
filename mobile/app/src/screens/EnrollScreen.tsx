@@ -8,7 +8,7 @@ import { mmss } from "../format";
 import { C } from "../theme";
 import { Settings } from "../types";
 
-const OPTIONS = { ...RecordingPresets.HIGH_QUALITY, sampleRate: 16000, numberOfChannels: 1, bitRate: 64000 };
+const OPTIONS = { ...RecordingPresets.HIGH_QUALITY, sampleRate: 16000, numberOfChannels: 1, bitRate: 48000, isMeteringEnabled: true };
 const MIN_MS = 12000; // cần >= 12 giây để server lấy đủ >= 8 giây có tiếng
 const SCRIPT = [
   "Xin chào chị, em là nhân viên tư vấn của nhãn hàng, em xin giới thiệu sản phẩm đang có khuyến mãi hôm nay ạ.",

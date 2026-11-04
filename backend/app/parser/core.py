@@ -10,7 +10,7 @@ from .catalog import Catalog
 from .prices import parse_price, price_suspect
 from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE, CONFIRM_CUT
 
-SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
+SEPARATORS = {",", ";", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
              "bich", "hu", "bo", "lo", "can", "bao", "vi"}
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
