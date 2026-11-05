@@ -1,5 +1,5 @@
-"""Phát hiện câu chốt đơn + tách (số lượng, SKU) + dò phản hồi khách.
-Không dùng LLM: chỉ regex + fuzzy matching.
+"""Tách đơn hàng từ transcript theo mẫu {số lượng} {sản phẩm} {giá} + dò phản hồi khách.
+Không dùng LLM: chỉ regex + fuzzy matching. Không cần từ khoá "chốt".
 """
 import re
 from rapidfuzz import fuzz
@@ -8,7 +8,7 @@ from .numbers import parse_number
 from .tokens import TOKEN_RE, SIZE_RE, SIZE_UNIT_MAP, size_norm
 from .catalog import Catalog
 from .prices import parse_price, price_suspect
-from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE, CONFIRM_CUT
+from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE
 
 SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
@@ -18,49 +18,11 @@ STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
 AMBIGUOUS = {"nam", "sau"}  # vừa là số vừa là từ thường (clear nam, ...)
 BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
-CLOSE_PREV = {"minh", "vay", "em", "nhe", "la", "se", "luon", "anh", "chi", "con"}
 SENT_END = re.compile(r"[.?!](?=\s|$)")
-# ASR hay nghe "chốt" thành những từ này (fuzz.ratio với "chot" < 75 nên không tự bắt được).
-# Là từ thật trong tiếng Việt ("cháu") nên chỉ nhận khi có ngữ cảnh câu chốt.
-ASR_CHOT_VARIANTS = {"chau", "chaut", "chao"}
-# "con chau" = con cháu -> không coi "con" là ngữ cảnh cho nhóm biến thể này
-CLOSE_PREV_STRICT = CLOSE_PREV - {"con"}
+MIN_MATCH = 0.6   # độ khớp SKU tối thiểu, dưới mức này coi là câu nói thường, bỏ qua
 
-CHOT_SAFE = {"chot", "choc", "chut", "chott"}   # biến thể không đụng từ thường
-ASR_CHOT_VARIANTS = {"chau", "chaut", "chao"}   # trùng "cháu", "chào" -> vẫn cần ngữ cảnh
-
-def find_closings(text: str) -> list[dict]:
-    """Tìm vị trí 'chốt đơn' (chịu lỗi ASR). 'chot' đúng thì nhận luôn; biến thể fuzzy phải đi kèm chữ 'don' ngay sau."""
-    hits = []
-    for m in re.finditer(r"\b[a-z]{3,5}\b", text):
-        tok = m.group()
-        if tok != "chot" and tok not in ASR_CHOT_VARIANTS and fuzz.ratio(tok, "chot") < 60:
-            continue
-        nxt = text[m.end():].split()[:1]
-        if tok == "chot" or (nxt and nxt[0] == "don"):
-            hits.append(m)
-    out = []
-    for k, m in enumerate(hits):
-        end_limit = hits[k + 1].start() if k + 1 < len(hits) else len(text)
-        out.append({"tail": text[m.end():end_limit].strip(), "start": m.start()})
-    return out
-
-
-# Số thứ tự đầu dòng do ASR tự thêm: "chốt 1. Omo 800g, 2. Clear ..." -> dấu chấm sau "1" KHÔNG phải hết câu.
+# Số thứ tự đầu dòng do ASR tự thêm: "Omo 800g, 2. Clear ..." -> dấu chấm sau "2" KHÔNG phải hết câu.
 LIST_NO = re.compile(r"(^|[,;]\s*)(\d{1,2})\.(?=\s)")
-
-
-def split_tail(tail: str) -> tuple[str, str]:
-    """Tách phần liệt kê SKU và phần còn lại (phản hồi của khách)."""
-    tail = re.sub(r"^[\s.,;]+(?=\d{1,2}\.\s)", "", tail)   # "chốt. 1. omo ..." -> bỏ dấu câu thừa trước số thứ tự
-    tail = LIST_NO.sub(r"\1\2", tail)
-    m = SENT_END.search(tail)
-    if m:
-        return tail[:m.start()], tail[m.end():]
-    c = CONFIRM_CUT.search(tail)
-    if c:
-        return tail[:c.start()], tail[c.start():]
-    return tail, ""
 
 
 def detect_customer_confirm(after: str) -> tuple[str, str | None]:
@@ -121,6 +83,8 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     i, n = 0, len(toks)
     while i < n:
         t = toks[i]
+        if price is not None and t not in SEPARATORS and parse_number(toks, i) is None:
+            flush()   # đã có giá -> kết thúc dòng hàng, chữ lan man phía sau không thuộc tên SKU
         if t in SEPARATORS:
             if t in {",", ";"} and name and price is None:
                 pr = parse_price(toks, _skip_price_lead(toks, i + 1))  # "800g, giá 65k đồng": ASR chèn dấu phẩy giữa tên SKU và giá
@@ -167,67 +131,61 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     return segs
 
 
-def _build_order(items_text: str, after: str, catalog: Catalog, source: str = "text") -> dict | None:
-    """Dựng một đơn từ phần liệt kê SKU + phần phản hồi của khách.
-    source: 'customer_turn' (phản hồi lấy từ lượt KHÁCH), 'no_customer_turn' (chỉ SA nói -> chưa rõ) hoặc 'text' (chưa tách người nói)."""
+def _extract_items(text: str, catalog: Catalog) -> list[dict]:
+    """Quét toàn văn, chỉ giữ dòng có ĐỦ số lượng + sản phẩm khớp catalog + giá."""
+    text = LIST_NO.sub(r"\1\2", text)           # bỏ số thứ tự ASR tự thêm: "1. omo" -> "1 omo"
     items = []
-    for qty, words, price in scan_segments(items_text):
-        res = catalog.match(words)
-        assumed = qty is None
-        q = 1 if assumed else qty
-        need = res["conf"] < 0.85 or assumed or q == 0 or q > 200 or price_suspect(price)
-        items.append({
-            "raw": " ".join(words), "qty": q, "qty_assumed": assumed,
-            "price": price, "price_missing": price is None,
-            **res, "need_confirm": need,
-        })
-    if not items:
-        return None
+    for sent in filter(str.strip, SENT_END.split(text)):
+        for qty, words, price in scan_segments(sent):
+            if qty is None or price is None:
+                continue
+            res = catalog.match(words)
+            if res["conf"] < MIN_MATCH:
+                continue
+            need = res["conf"] < 0.85 or qty == 0 or qty > 200 or price_suspect(price)
+            items.append({
+                "raw": " ".join(words), "qty": qty, "qty_assumed": False,
+                "price": price, "price_missing": False, **res, "need_confirm": need,
+            })
+    return items
+
+
+def _make_order(items: list[dict], after: str, source: str) -> dict:
     confirm, evidence = detect_customer_confirm(after)
     return {
-        "closing_text": items_text.strip(),
+        "closing_text": "; ".join(f'{i["qty"]} {i["raw"]} {i["price"]}' for i in items),
         "items": items,
         "customer_confirm": confirm,
         "customer_evidence": evidence,
         "confirm_source": source,
         "needs_review": any(i["need_confirm"] for i in items),
-        "missing_price": any(i["price_missing"] for i in items),
+        "missing_price": False,
     }
 
 
 def _orders_from_turns(turns: list[dict], catalog: Catalog) -> list[dict]:
-    """Câu chốt chỉ tìm trong lượt SA; phản hồi lấy từ lượt KHÁCH ngay sau đó.
+    """Mỗi lượt SA có dòng hàng -> 1 đơn; phản hồi lấy từ lượt KHÁCH ngay sau đó.
     Không có lượt khách liền sau -> "chưa rõ" (lời SA như "dạ ok em" KHÔNG được tính là khách đồng ý)."""
     orders = []
     for k, t in enumerate(turns):
         if t.get("speaker") != "sa":
             continue
-        closings = find_closings(normalize(t.get("text", "")))
-        if not closings:
+        items = _extract_items(normalize(t.get("text", "")), catalog)
+        if not items:
             continue
         cust, j = [], k + 1
         while j < len(turns) and turns[j].get("speaker") == "customer":
             cust.append(turns[j].get("text", ""))
             j += 1
         cust_norm = normalize(" ".join(cust))
-        for idx, c in enumerate(closings):
-            items_text, _sa_tail = split_tail(c["tail"])  # phần đuôi là lời SA -> bỏ, không dùng để đoán khách
-            if idx == len(closings) - 1 and cust_norm:
-                after, source = cust_norm, "customer_turn"
-            else:
-                after, source = "", "no_customer_turn"
-            o = _build_order(items_text, after, catalog, source)
-            if o:
-                orders.append(o)
+        orders.append(_make_order(items, cust_norm, "customer_turn" if cust_norm else "no_customer_turn"))
     return orders
 
 
 def parse_transcript(text: str, catalog: Catalog, turns: list[dict] | None = None) -> dict:
     orders = _orders_from_turns(turns, catalog) if turns else []
-    if not orders:  # không có turns, hoặc không thấy câu chốt trong lời SA -> quay về toàn văn
-        for c in find_closings(normalize(text)):
-            items_text, after = split_tail(c["tail"])
-            o = _build_order(items_text, after, catalog)
-            if o:
-                orders.append(o)
+    if not orders:  # chưa tách người nói -> quét toàn văn, gom thành 1 đơn
+        items = _extract_items(normalize(text), catalog)
+        if items:
+            orders = [_make_order(items, "", "text")]
     return {"closing_detected": bool(orders), "orders": orders}

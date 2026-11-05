@@ -8,7 +8,6 @@ CHECKS = [
     ("promo", "Giới thiệu khuyến mãi", r"\b(khuyen mai|giam gia|tang kem|uu dai|combo|qua tang)\b"),
     ("upsell", "Gợi ý mua thêm / bán kèm", r"\b(mua them|lay them|dung kem|di kem|ket hop|size lon|loai lon|tiet kiem hon)\b"),
 ]
-CLOSING_TEMPLATE = r"\b(chot|choc|chut|chott|chaut|chop|chot)\b"
 
 OBJECTIONS = {
     "price": ("Chê giá đắt", r"\b(dat qua|hoi dat|dat vay|mac qua|hoi mac|mac vay|gia cao|qua tien)\b"),
@@ -23,8 +22,6 @@ def analyze(text: str, sa_text: str | None = None, customer_text: str | None = N
     n = normalize(sa_text if sa_text is not None else (text or ""))
     n_obj = normalize(customer_text) if customer_text is not None else n
     checklist = [{"key": k, "label": lbl, "passed": bool(re.search(rx, n))} for k, lbl, rx in CHECKS]
-    checklist.append({"key": "closing_template", "label": "Dùng đúng câu chốt đơn mẫu",
-                      "passed": bool(re.search(CLOSING_TEMPLATE, n))})
     score = round(100 * sum(c["passed"] for c in checklist) / len(checklist))
     objections = [k for k, (_, rx) in OBJECTIONS.items() if re.search(rx, n_obj)]
     return {"checklist": checklist, "score": score, "objections": objections}
