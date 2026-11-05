@@ -31,8 +31,11 @@ def test_numbers(words, expected):
     assert parse_number(toks, 0) == (expected, len(toks))
 
 
+# Quy tắc mới: một dòng hàng chỉ được ghi nhận khi có ĐỦ {số lượng} {sản phẩm} {giá}; không cần từ "chốt".
+
 def test_template_chuan():
-    r = run("Dạ em xin cảm ơn anh chị, vậy mình chốt 2 OMO bột giặt đỏ 9kg, 1 Clear Men nước hoa warm forest 350g. Dạ đúng rồi em.")
+    r = run("Dạ em xin cảm ơn anh chị, vậy mình chốt 2 OMO bột giặt đỏ 9kg 65 nghìn đồng, "
+            "1 Clear Men nước hoa warm forest 350g 120 nghìn đồng. Dạ đúng rồi em.")
     assert r["closing_detected"]
     o = r["orders"][0]
     assert [(i["sku_id"], i["qty"]) for i in o["items"]] == [(OMO, 2), (CLEAR_MEN, 1)]
@@ -40,61 +43,68 @@ def test_template_chuan():
     assert not o["needs_review"]
 
 
+def test_khong_can_tu_chot():
+    assert items("2 omo bột giặt đỏ 9kg 65 nghìn đồng, 1 clear men nước hoa warm forest 350g 120 nghìn đồng") == [
+        (OMO, 2), (CLEAR_MEN, 1)]
+
+
 def test_so_bang_chu():
-    assert items("Dạ em xin cảm ơn anh chị, vậy mình chốt hai omo bột giặt đỏ 9kg, ba sunsilk mềm mượt diệu kỳ 170g.") == [
-        (OMO, 2), (SUNSILK, 3)]
+    assert items("Dạ em xin cảm ơn anh chị, vậy mình chốt hai omo bột giặt đỏ 9kg sáu mươi lăm nghìn, "
+                 "ba sunsilk mềm mượt diệu kỳ 170g bốn mươi nghìn.") == [(OMO, 2), (SUNSILK, 3)]
 
 
 def test_hai_muoi_lam():
-    assert items("vậy mình chốt hai mươi lăm gói knorr cá kho riềng 28g.") == [(KNORR_CKR, 25)]
+    assert items("vậy mình chốt hai mươi lăm gói knorr cá kho riềng 28g 5 nghìn.") == [(KNORR_CKR, 25)]
 
 
 def test_loi_asr_chot_va_ten():
-    assert items("Dạ em cảm ơn anh chị vậy mình chót 1 ô mô bột giặt đỏ 9kg") == [(OMO, 1)]
+    # "chót" (ASR nghe sai) không còn quan trọng; tên "ô mô" vẫn khớp OMO
+    assert items("Dạ em cảm ơn anh chị vậy mình chót 1 ô mô bột giặt đỏ 9kg 65 nghìn") == [(OMO, 1)]
 
 
 def test_khong_dau_khong_phay():
-    assert items("vay minh chot 2 omo bot giat do 9kg 1 clear men nuoc hoa warm forest 350g 3 sunsilk mem muot dieu ky 170g") == [
-        (OMO, 2), (CLEAR_MEN, 1), (SUNSILK, 3)]
+    assert items("vay minh chot 2 omo bot giat do 9kg 65 nghin 1 clear men nuoc hoa warm forest 350g 120 nghin "
+                 "3 sunsilk mem muot dieu ky 170g 40 nghin") == [(OMO, 2), (CLEAR_MEN, 1), (SUNSILK, 3)]
 
 
 def test_size_bang_chu():
-    assert items("vậy mình chốt hai hazeline sữa gạo chín trăm gam, một comfort một phẩy hai lít.")[0] == (HAZELINE_900G, 2)
+    assert items("vậy mình chốt hai hazeline sữa gạo chín trăm gam 90 nghìn.")[0] == (HAZELINE_900G, 2)
 
 
 def test_nam_la_ten_khong_phai_so():
     # "năm" ở đây là số lượng 5. (Catalog mới không còn alias "clear nam", nên chỉ còn kiểm tra phần số.)
-    assert items("vậy mình chốt hai dầu gội clear men nước hoa warm forest 350g, năm sunsilk mềm mượt diệu kỳ 170g.") == [
-        (CLEAR_MEN, 2), (SUNSILK, 5)]
+    assert items("vậy mình chốt hai dầu gội clear men nước hoa warm forest 350g 120 nghìn, "
+                 "năm sunsilk mềm mượt diệu kỳ 170g 40 nghìn.") == [(CLEAR_MEN, 2), (SUNSILK, 5)]
 
 
 def test_khach_tu_choi():
-    o = run("vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g. Thôi để chị suy nghĩ thêm.")["orders"][0]
+    o = run("vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g 65 nghìn. Thôi để chị suy nghĩ thêm.")["orders"][0]
     assert o["customer_confirm"] == "no"
 
 
 def test_khach_im_lang():
-    assert run("vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g.")["orders"][0]["customer_confirm"] == "none"
+    assert run("vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g 65 nghìn.")["orders"][0]["customer_confirm"] == "none"
 
 
-def test_khong_co_chot():
+def test_khong_co_dong_hang():
     assert run("Chào anh chị, bên em đang có khuyến mãi omo đỏ 9kg ạ")["closing_detected"] is False
 
 
 def test_mo_ho_can_xac_nhan():
     # Thiếu dung tích: Sunsilk "mềm mượt diệu kỳ" có nhiều SKU (gội 170g/600g/850g, xả 600g) gần như hoà điểm
-    o = run("vậy mình chốt 2 sunsilk mềm mượt diệu kỳ.")["orders"][0]
+    o = run("vậy mình chốt 2 sunsilk mềm mượt diệu kỳ 65 nghìn.")["orders"][0]
     assert o["needs_review"] and o["items"][0]["need_confirm"]
     assert len(o["items"][0]["candidates"]) == 3
 
 
-def test_thieu_so_luong():
-    i = run("vậy mình chốt Lifebuoy than hoạt tính cám gạo 270g.")["orders"][0]["items"][0]
-    assert i["qty"] == 1 and i["qty_assumed"] and i["need_confirm"]
+def test_thieu_so_luong_bi_bo_qua():
+    # không có số lượng -> không phải dòng hàng hợp lệ
+    assert run("vậy mình chốt Lifebuoy than hoạt tính cám gạo 270g 85 nghìn.")["orders"] == []
 
 
 def test_nhieu_don_trong_mot_cuoc():
-    r = run("vậy mình chốt 2 omo bột giặt đỏ 9kg. Dạ ok em. ... Dạ em cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g. Thôi chị ơi.")
+    r = run("vậy mình chốt 2 omo bột giặt đỏ 9kg 65 nghìn. Dạ ok em. ... "
+            "Dạ em cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g 40 nghìn. Thôi chị ơi.")
     assert len(r["orders"]) == 2
     assert r["orders"][0]["customer_confirm"] == "yes"
     assert r["orders"][1]["customer_confirm"] == "no"
@@ -131,16 +141,16 @@ def test_gia_ruoi_va_le():
         (OMO, 2, 65500), (LUX, 1, 60250)]
 
 
-def test_quen_gia():
-    r = run("vậy mình chốt 2 omo bột giặt đỏ 9kg, 1 clear men nước hoa warm forest 350g 120 nghìn đồng")["orders"][0]
-    assert [i["price"] for i in r["items"]] == [None, 120000]
-    assert r["missing_price"] and not r["needs_review"]
+def test_quen_gia_thi_bo_dong_do():
+    # dòng omo không có giá -> bị bỏ; chỉ còn dòng clear có đủ số lượng + giá
+    assert prices("vậy mình chốt 2 omo bột giặt đỏ 9kg, 1 clear men nước hoa warm forest 350g 120 nghìn đồng") == [
+        (CLEAR_MEN, 1, 120000)]
 
 
 def test_gia_khong_nham_voi_so_luong():
     # "1" sau dấu phẩy là số lượng, "9"/"350" là dung tích sản phẩm, không có đơn vị tiền nên không bị coi là giá
-    assert prices("vậy mình chốt 2 omo bột giặt đỏ 9kg, 1 clear men nước hoa warm forest 350g") == [
-        (OMO, 2, None), (CLEAR_MEN, 1, None)]
+    # -> không dòng nào đủ số lượng + giá -> không có đơn
+    assert run("vậy mình chốt 2 omo bột giặt đỏ 9kg, 1 clear men nước hoa warm forest 350g")["orders"] == []
 
 
 def test_gia_co_chu_gia_va_khong_phay():

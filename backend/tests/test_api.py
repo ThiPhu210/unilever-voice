@@ -15,7 +15,8 @@ HAZELINE_900G = "HAZELINE-SUATAM-GAO-900G"                       # sku_id khai b
 
 def test_flow():
     r = c.post("/api/sessions/text", json={
-        "transcript": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg, 1 clear men nước hoa warm forest 350g. Dạ ok em.",
+        "transcript": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg 65 nghìn, "
+                      "1 clear men nước hoa warm forest 350g 120 nghìn. Dạ ok em.",
         "sa_name": "Lan"})
     sid = r.json()["id"]
     s = c.get(f"/api/sessions/{sid}").json()
@@ -30,7 +31,7 @@ def test_flow():
 def test_overview_and_coaching():
     c.post("/api/sessions/text", json={
         "transcript": "Xin chào chị, chị đang dùng loại nào ạ? Bên em có khuyến mãi tặng kèm, chị lấy thêm một chai nhé. "
-                      "Dạ em xin cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g. Thôi để chị suy nghĩ.",
+                      "Dạ em xin cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g 65 nghìn. Thôi để chị suy nghĩ.",
         "sa_id": "sa02", "sa_name": "Hoa"})
     o = c.get("/api/stats/overview?days=1").json()
     assert o["kpi"]["orders"] >= 2 and o["kpi"]["declined"] >= 1
@@ -51,8 +52,8 @@ def test_upload_audio_flow(monkeypatch):
     """Upload audio -> ASR (giả lập) -> parser -> lưu DB -> tải lại audio."""
     from app import asr
     monkeypatch.setattr(asr, "transcribe", lambda path, hot="": {
-        "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Dạ ok em.",
-        "segments": [{"start": 0.0, "end": 4.0, "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg."},
+        "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg 65 nghìn. Dạ ok em.",
+        "segments": [{"start": 0.0, "end": 4.0, "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg 65 nghìn."},
                      {"start": 4.0, "end": 5.0, "text": "Dạ ok em."}],
         "duration": 5.0})
     r = c.post("/api/sessions", files={"audio": ("rec.m4a", b"fakeaudio", "audio/m4a")},
@@ -76,6 +77,7 @@ def test_upload_asr_error_is_recorded(monkeypatch):
 
 
 def test_gia_va_sua_gia_va_doanh_thu():
+    # dòng clear không đọc giá -> parser bỏ; đơn chỉ có omo (đủ số lượng + giá)
     r = c.post("/api/sessions/text", json={
         "transcript": "Dạ em xin cảm ơn anh chị, vậy mình chốt 2 omo bột giặt đỏ 9kg 65 nghìn đồng, "
                       "1 clear men nước hoa warm forest 350g. Dạ ok em.",
@@ -83,10 +85,11 @@ def test_gia_va_sua_gia_va_doanh_thu():
     sid = r.json()["id"]
     s = c.get(f"/api/sessions/{sid}").json()
     o = s["orders"][0]
-    assert o["missing_price"] == 1 and o["total"] == 130000
+    assert [i["sku_id"] for i in o["items"]] == [OMO]
+    assert o["missing_price"] == 0 and o["total"] == 130000
     row = [x for x in c.get("/api/sessions?sa_id=sa09").json() if x["id"] == sid][0]
-    assert row["missing_price"] == 1 and row["revenue"] == 130000
-    # SA bổ sung giá quên nói + thêm 1 SKU
+    assert row["missing_price"] == 0 and row["revenue"] == 130000
+    # SA bổ sung dòng bị bỏ sót + thêm 1 SKU
     items = [{"sku_id": OMO, "qty": 2, "price": 65000},
              {"sku_id": CLEAR_MEN, "qty": 1, "price": 120000},
              {"sku_id": SUNSILK, "qty": 1, "price": 99000}]
@@ -102,7 +105,7 @@ def test_gia_va_sua_gia_va_doanh_thu():
 
 
 def test_sua_gia_khong_hop_le():
-    r = c.post("/api/sessions/text", json={"transcript": "vậy mình chốt 1 omo bột giặt đỏ 9kg.", "sa_id": "sa10"})
+    r = c.post("/api/sessions/text", json={"transcript": "vậy mình chốt 1 omo bột giặt đỏ 9kg 65 nghìn.", "sa_id": "sa10"})
     oid = c.get(f"/api/sessions/{r.json()['id']}").json()["orders"][0]["id"]
     assert c.put(f"/api/orders/{oid}/items", json=[{"sku_id": OMO, "qty": 1, "price": -5}]).status_code == 400
     assert c.put(f"/api/orders/{oid}/items", json=[]).status_code == 400

@@ -131,23 +131,35 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     return segs
 
 
-def _extract_items(text: str, catalog: Catalog) -> list[dict]:
-    """Quét toàn văn, chỉ giữ dòng có ĐỦ số lượng + sản phẩm khớp catalog + giá."""
-    text = LIST_NO.sub(r"\1\2", text)           # bỏ số thứ tự ASR tự thêm: "1. omo" -> "1 omo"
+def _items_in(sentence: str, catalog: Catalog) -> list[dict]:
+    """Trong một câu, chỉ giữ dòng có ĐỦ số lượng + sản phẩm khớp catalog + giá."""
     items = []
-    for sent in filter(str.strip, SENT_END.split(text)):
-        for qty, words, price in scan_segments(sent):
-            if qty is None or price is None:
-                continue
-            res = catalog.match(words)
-            if res["conf"] < MIN_MATCH:
-                continue
-            need = res["conf"] < 0.85 or qty == 0 or qty > 200 or price_suspect(price)
-            items.append({
-                "raw": " ".join(words), "qty": qty, "qty_assumed": False,
-                "price": price, "price_missing": False, **res, "need_confirm": need,
-            })
+    for qty, words, price in scan_segments(sentence):
+        if qty is None or price is None:
+            continue
+        res = catalog.match(words)
+        if res["conf"] < MIN_MATCH:
+            continue
+        need = res["conf"] < 0.85 or qty == 0 or qty > 200 or price_suspect(price)
+        items.append({
+            "raw": " ".join(words), "qty": qty, "qty_assumed": False,
+            "price": price, "price_missing": False, **res, "need_confirm": need,
+        })
     return items
+
+
+def _item_groups(text: str, catalog: Catalog) -> list[tuple[list[dict], str]]:
+    """Chia toàn văn thành các nhóm: mỗi câu có dòng hàng mở một nhóm mới; các câu liền sau
+    (đến câu có hàng kế tiếp) là 'phản hồi' của nhóm đó. Trả về [(items, after_text)]."""
+    text = LIST_NO.sub(r"\1\2", text)           # bỏ số thứ tự ASR tự thêm: "1. omo" -> "1 omo"
+    groups: list[list] = []
+    for sent in filter(str.strip, SENT_END.split(text)):
+        items = _items_in(sent, catalog)
+        if items:
+            groups.append([items, []])
+        elif groups:
+            groups[-1][1].append(sent.strip())
+    return [(items, " ".join(after)) for items, after in groups]
 
 
 def _make_order(items: list[dict], after: str, source: str) -> dict:
@@ -164,28 +176,31 @@ def _make_order(items: list[dict], after: str, source: str) -> dict:
 
 
 def _orders_from_turns(turns: list[dict], catalog: Catalog) -> list[dict]:
-    """Mỗi lượt SA có dòng hàng -> 1 đơn; phản hồi lấy từ lượt KHÁCH ngay sau đó.
+    """Dòng hàng chỉ tìm trong lượt SA; phản hồi lấy từ lượt KHÁCH ngay sau đó.
     Không có lượt khách liền sau -> "chưa rõ" (lời SA như "dạ ok em" KHÔNG được tính là khách đồng ý)."""
     orders = []
     for k, t in enumerate(turns):
         if t.get("speaker") != "sa":
             continue
-        items = _extract_items(normalize(t.get("text", "")), catalog)
-        if not items:
+        groups = _item_groups(normalize(t.get("text", "")), catalog)
+        if not groups:
             continue
         cust, j = [], k + 1
         while j < len(turns) and turns[j].get("speaker") == "customer":
             cust.append(turns[j].get("text", ""))
             j += 1
         cust_norm = normalize(" ".join(cust))
-        orders.append(_make_order(items, cust_norm, "customer_turn" if cust_norm else "no_customer_turn"))
+        for idx, (items, _sa_tail) in enumerate(groups):   # phần đuôi là lời SA -> bỏ, không dùng để đoán khách
+            if idx == len(groups) - 1 and cust_norm:
+                orders.append(_make_order(items, cust_norm, "customer_turn"))
+            else:
+                orders.append(_make_order(items, "", "no_customer_turn"))
     return orders
 
 
 def parse_transcript(text: str, catalog: Catalog, turns: list[dict] | None = None) -> dict:
     orders = _orders_from_turns(turns, catalog) if turns else []
-    if not orders:  # chưa tách người nói -> quét toàn văn, gom thành 1 đơn
-        items = _extract_items(normalize(text), catalog)
-        if items:
-            orders = [_make_order(items, "", "text")]
+    if not orders:  # chưa tách người nói (hoặc không thấy dòng hàng trong lời SA) -> quét toàn văn
+        for items, after in _item_groups(normalize(text), catalog):
+            orders.append(_make_order(items, after, "text"))
     return {"closing_detected": bool(orders), "orders": orders}
