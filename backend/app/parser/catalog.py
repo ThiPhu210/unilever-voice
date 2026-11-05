@@ -1,7 +1,14 @@
 import csv
 import os
 from rapidfuzz import fuzz
+from .normalize import strip_accents
 from .tokens import canon_tokens, SIZE_RE
+import re
+
+
+def make_sku_id(name: str) -> str:
+    """Tạo mã SKU ổn định từ tên: bỏ dấu, chữ thường, nối bằng dấu gạch ngang."""
+    return re.sub(r"[^a-z0-9.]+", "-", strip_accents(name.lower())).strip("-")
 
 
 class Catalog:
@@ -15,6 +22,13 @@ class Catalog:
         self.index: list[tuple[str, str, str | None]] = []  # (sku_id, alias_words, alias_size)
         with open(path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
+                # CSV chỉ cần 2 cột: name, aliases. sku_id (nếu có) được giữ; không có thì sinh từ tên.
+                row["name"] = row["name"].strip()
+                row["sku_id"] = (row.get("sku_id") or "").strip() or make_sku_id(row["name"])
+                row["unit"] = row.get("unit") or ""
+                row["aliases"] = row.get("aliases") or ""
+                if row["sku_id"] in self.skus:
+                    raise ValueError(f"Trùng SKU trong catalog: {row['name']}")
                 self.rows.append(row)
                 self.skus[row["sku_id"]] = {
                     "sku_id": row["sku_id"], "name": row["name"], "unit": row["unit"],
