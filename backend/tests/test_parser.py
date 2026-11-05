@@ -97,9 +97,17 @@ def test_mo_ho_can_xac_nhan():
     assert len(o["items"][0]["candidates"]) == 3
 
 
-def test_thieu_so_luong_bi_bo_qua():
-    # không có số lượng -> không phải dòng hàng hợp lệ
-    assert run("vậy mình chốt Lifebuoy than hoạt tính cám gạo 270g 85 nghìn.")["orders"] == []
+def test_thieu_so_luong_gia_dinh_1():
+    # có sản phẩm + giá nhưng ASR rơi mất số lượng -> giả định 1 và đánh dấu cần xác nhận
+    o = run("vậy mình chốt Lifebuoy than hoạt tính cám gạo 270g 85 nghìn.")["orders"][0]
+    i = o["items"][0]
+    assert i["qty"] == 1 and i["qty_assumed"] and i["need_confirm"] and o["needs_review"]
+
+
+def test_asr_rot_so_luong_va_lap_dung_tich():
+    # transcript thật: "1" bị nghe thành "3 .1KG" ở đầu câu, dung tích lặp 2 lần
+    i = run("SA: 3 .1KG, COMFORT Nước giặt dưỡng vải thơm thường 3 .1KG, GIÁ 92K")["orders"][0]["items"][0]
+    assert i["qty"] == 1 and i["qty_assumed"] and i["price"] == 92000
 
 
 def test_nhieu_don_trong_mot_cuoc():

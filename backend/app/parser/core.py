@@ -135,14 +135,16 @@ def _items_in(sentence: str, catalog: Catalog) -> list[dict]:
     """Trong một câu, chỉ giữ dòng có ĐỦ số lượng + sản phẩm khớp catalog + giá."""
     items = []
     for qty, words, price in scan_segments(sentence):
-        if qty is None or price is None:
+        if price is None:       # bắt buộc có giá
             continue
         res = catalog.match(words)
         if res["conf"] < MIN_MATCH:
             continue
-        need = res["conf"] < 0.85 or qty == 0 or qty > 200 or price_suspect(price)
+        assumed = qty is None   # ASR rơi mất số lượng ("3 .1KG, COMFORT ... GIA 92K") -> giả định 1, đánh dấu cần xác nhận
+        q = 1 if assumed else qty
+        need = res["conf"] < 0.85 or assumed or q == 0 or q > 200 or price_suspect(price)
         items.append({
-            "raw": " ".join(words), "qty": qty, "qty_assumed": False,
+            "raw": " ".join(words), "qty": q, "qty_assumed": assumed,
             "price": price, "price_missing": False, **res, "need_confirm": need,
         })
     return items
