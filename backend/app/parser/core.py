@@ -51,8 +51,14 @@ def find_closings(text: str) -> list[dict]:
     return out
 
 
+# Số thứ tự đầu dòng do ASR tự thêm: "chốt 1. Omo 800g, 2. Clear ..." -> dấu chấm sau "1" KHÔNG phải hết câu.
+LIST_NO = re.compile(r"(^|[,;]\s*)(\d{1,2})\.(?=\s)")
+
+
 def split_tail(tail: str) -> tuple[str, str]:
     """Tách phần liệt kê SKU và phần còn lại (phản hồi của khách)."""
+    tail = re.sub(r"^[\s.,;]+(?=\d{1,2}\.\s)", "", tail)   # "chốt. 1. omo ..." -> bỏ dấu câu thừa trước số thứ tự
+    tail = LIST_NO.sub(r"\1\2", tail)
     m = SENT_END.search(tail)
     if m:
         return tail[:m.start()], tail[m.end():]
@@ -76,10 +82,26 @@ def detect_customer_confirm(after: str) -> tuple[str, str | None]:
 PRICE_LEAD = {"gia", "da", "don", "la"}  # "giá", "đơn giá là" đứng trước con số giá; "da" = ASR nghe "giá" thành "dạ"
 
 
+def _like_gia(t: str) -> bool:
+    """ASR nghe 'giá' thành 'dạ', 'dạm', 'dả', 'giạ'... -> token ngắn, toàn chữ, gần giống 'gia'/'da'."""
+    return t.isalpha() and len(t) <= 4 and max(fuzz.ratio(t, "gia"), fuzz.ratio(t, "da")) >= 66
+
+
 def _skip_price_lead(toks: list[str], j: int) -> int:
     while j < len(toks) and toks[j] in PRICE_LEAD:
         j += 1
+    # tiền tố nghe sai ("dạm 103k"): chỉ bỏ qua khi NGAY SAU đó thật sự là một mức giá, để không nuốt nhầm tên SKU
+    k = j
+    while k < len(toks) and k - j < 2 and _like_gia(toks[k]):
+        k += 1
+    if k > j and parse_price(toks, k):
+        return k
     return j
+
+
+def _price_follows(toks: list[str], j: int) -> bool:
+    """Sau toks[j-1] có dấu phẩy rồi tới một mức giá riêng ('..., dạm 86k') không?"""
+    return j < len(toks) and toks[j] in {",", ";"} and parse_price(toks, _skip_price_lead(toks, j + 1)) is not None
 
 
 def _starts_item(toks: list[str], i: int) -> bool:
@@ -118,6 +140,14 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             name.append(size_norm(m.group(1), m.group(2))); i += 1; continue
         if t in LEAD_STRIP and not name and qty is None:
             i += 1; continue
+        if name and price is None and re.fullmatch(r"\d+", t) and _price_follows(toks, i + 1):
+            name.append(t); i += 1; continue  # "bảo vệ 123, giá 48k" / "viên rửa chén 1401, giá 86k": số đứng cuối TÊN, giá nằm sau dấu phẩy
+        if not name and qty is None and segs and segs[-1][2] is None:
+            k = _skip_price_lead(toks, i)  # giá "mồ côi" ngay sau một dòng đã đóng: gắn lại vào dòng trước, không tạo dòng mới
+            pr = parse_price(toks, k) if (k > i or not re.fullmatch(r"\d+", t)) else None
+            if pr:
+                segs[-1] = (segs[-1][0], segs[-1][1], pr[0]); i = pr[1]
+                continue
         if name and price is None:
             pr = parse_price(toks, i)  # "... 65 nghìn đồng" ngay sau tên SKU
             if pr:
