@@ -35,6 +35,8 @@ def _tail_after_thousand(toks: list[str], j: int) -> tuple[int, int]:
 def parse_price(toks: list[str], i: int) -> tuple[int, int] | None:
     """Thử đọc giá tại vị trí i. Trả về (vnd, vị_trí_kế_tiếp) hoặc None."""
     n = len(toks)
+    if i >= n:  # hết câu ngay sau dấu phẩy / chữ "giá" -> không có gì để đọc
+        return None
     t = toks[i]
     m = NUM_TOKEN.match(t)
     if m:

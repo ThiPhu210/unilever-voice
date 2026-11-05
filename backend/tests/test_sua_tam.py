@@ -13,12 +13,14 @@ def test_sua_tam_khong_bi_doc_la_so_tam():
 
 
 def test_sua_tam_cu_van_dung():
-    assert items("vậy mình chốt 2 sữa tắm lifebuoy 850g, 1 sữa tắm lux 850g.") == [
-        ("LIFEBUOY-SG-850G", 2), ("LUX-SG-850G", 1)]
+    assert items("vậy mình chốt 2 sữa tắm lifebuoy than hoạt tính cám gạo 270g, 1 sữa tắm lux peaceful galaxy 470g.") == [
+        ("lifebuoy-sua-tam-than-hoat-tinh-cam-gao-270g", 2), ("lux-sua-tam-peaceful-galaxy-470g", 1)]
 
 
 def test_tam_tram_gam_van_la_800g():
-    assert items("vậy mình chốt hai omo tám trăm gam.")[0] == ("OMO-BOT-800G", 2)
+    # "tám trăm năm mươi gam" = 850g; "tám" (8) không được lẫn với "tắm" (bỏ dấu cùng thành "tam")
+    assert items("vậy mình chốt hai sunsilk mềm mượt diệu kỳ tám trăm năm mươi gam.")[0] == (
+        "sunsilk-dau-goi-mem-muot-dieu-ky-850g", 2)
 
 
 def test_hazeline_duong_the():

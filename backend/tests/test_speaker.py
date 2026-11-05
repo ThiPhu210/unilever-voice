@@ -76,7 +76,7 @@ def turns(*pairs):
 
 
 def test_parse_turns_xac_nhan_lay_tu_loi_khach():
-    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g."),
+    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg."),
               ("customer", "Dạ đúng rồi em."))
     o = parse_transcript("", main.catalog, t)["orders"][0]
     assert o["customer_confirm"] == "yes" and o["confirm_source"] == "customer_turn"
@@ -84,7 +84,7 @@ def test_parse_turns_xac_nhan_lay_tu_loi_khach():
 
 def test_parse_turns_loi_sa_khong_bi_tinh_la_khach():
     # SA hỏi "chị có lấy thêm gì không ạ" - trước đây bị đọc là khách đồng ý/từ chối
-    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Chị có lấy thêm gì không ạ?"),
+    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Chị có lấy thêm gì không ạ?"),
               ("customer", "Thôi để chị suy nghĩ thêm."))
     o = parse_transcript("", main.catalog, t)["orders"][0]
     assert o["customer_confirm"] == "no"
@@ -93,29 +93,29 @@ def test_parse_turns_loi_sa_khong_bi_tinh_la_khach():
 def test_parse_turns_khach_chi_nghe_duoc_khi_dung_luot():
     t = turns(("sa", "Chào chị, chị đang dùng loại khác à, ok vậy chị xem thử nhé."),
               ("customer", "Chưa cần đâu em."),
-              ("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 1 dove 640ml."),
+              ("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g."),
               ("customer", "Ok em lấy luôn."))
     r = parse_transcript("", main.catalog, t)
     assert len(r["orders"]) == 1 and r["orders"][0]["customer_confirm"] == "yes"
 
 
 def test_parse_turns_nhieu_don():
-    t = turns(("sa", "Dạ em cảm ơn chị, vậy mình chốt 2 omo 800g."), ("customer", "Dạ ok em."),
-              ("sa", "Dạ em cảm ơn chị, vậy mình chốt 1 dove 640ml."), ("customer", "Thôi chị ơi."))
+    t = turns(("sa", "Dạ em cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg."), ("customer", "Dạ ok em."),
+              ("sa", "Dạ em cảm ơn chị, vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g."), ("customer", "Thôi chị ơi."))
     r = parse_transcript("", main.catalog, t)
     assert [o["customer_confirm"] for o in r["orders"]] == ["yes", "no"]
 
 
 def test_parse_turns_khong_co_luot_khach_la_chua_ro():
     # chỉ có lượt SA: lời SA "dạ đúng rồi em" KHÔNG được tính là khách đồng ý
-    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Dạ đúng rồi em."))
+    t = turns(("sa", "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Dạ đúng rồi em."))
     o = parse_transcript("", main.catalog, t)["orders"][0]
     assert o["customer_confirm"] == "none" and o["confirm_source"] == "no_customer_turn"
 
 
 def test_parse_turns_nhan_sai_thi_quay_ve_toan_van():
     t = turns(("customer", "x"))   # không có câu chốt trong lời SA
-    r = parse_transcript("vậy mình chốt 1 dove 640ml. Dạ ok em.", main.catalog, t)
+    r = parse_transcript("vậy mình chốt 1 sunsilk mềm mượt diệu kỳ 170g. Dạ ok em.", main.catalog, t)
     assert r["orders"][0]["customer_confirm"] == "yes"
 
 
@@ -183,11 +183,11 @@ def test_process_dung_dau_giong(monkeypatch):
                ("saP", json.dumps(FAKE["embedding"]), 192, "m", 3, db.now_str(), db.now_str()))
     db.execute("INSERT INTO sessions(id,sa_id,sa_name,store,audio_path,status,created_at) VALUES(?,?,?,?,?,'queued',?)",
                ("p1", "saP", "P", "", "/nonexistent.m4a", db.now_str()))
-    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Chị có lấy thêm gì không ạ. Thôi để chị suy nghĩ."
+    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Chị có lấy thêm gì không ạ. Thôi để chị suy nghĩ."
     monkeypatch.setattr(asr, "transcribe", lambda path, hot="": {
         "text": text, "segments": [{"start": 0, "end": 9, "text": text}], "words": [{"w": "x", "start": 0, "end": 1}], "duration": 9.0})
     monkeypatch.setattr(speaker, "diarize", lambda path, words, vp: {"method": "cluster", "sa_score": .9, "turns": [
-        {"speaker": "sa", "start": 0, "end": 5, "score": .9, "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Chị có lấy thêm gì không ạ."},
+        {"speaker": "sa", "start": 0, "end": 5, "score": .9, "text": "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Chị có lấy thêm gì không ạ."},
         {"speaker": "customer", "start": 5.5, "end": 8, "score": .1, "text": "Thôi để chị suy nghĩ."}]})
     main._process("p1")
     s = c.get("/api/sessions/p1").json()
@@ -200,7 +200,7 @@ def test_process_khong_co_dau_giong_chay_nhu_cu(monkeypatch):
     import app.asr as asr
     db.execute("INSERT INTO sessions(id,sa_id,sa_name,store,audio_path,status,created_at) VALUES(?,?,?,?,?,'queued',?)",
                ("p2", "saNone", "N", "", "/nonexistent.m4a", db.now_str()))
-    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Dạ ok em."
+    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Dạ ok em."
     monkeypatch.setattr(asr, "transcribe", lambda path, hot="": {
         "text": text, "segments": [{"start": 0, "end": 5, "text": text}], "words": [], "duration": 5.0})
     called = []
@@ -216,7 +216,7 @@ def test_process_loi_nhan_dien_khong_lam_hong_phien(monkeypatch):
                ("saQ", json.dumps(FAKE["embedding"]), 192, "m", 3, db.now_str(), db.now_str()))
     db.execute("INSERT INTO sessions(id,sa_id,sa_name,store,audio_path,status,created_at) VALUES(?,?,?,?,?,'queued',?)",
                ("p3", "saQ", "Q", "", "/nonexistent.m4a", db.now_str()))
-    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo 800g. Dạ ok em."
+    text = "Dạ em xin cảm ơn chị, vậy mình chốt 2 omo bột giặt đỏ 9kg. Dạ ok em."
     monkeypatch.setattr(asr, "transcribe", lambda path, hot="": {
         "text": text, "segments": [{"start": 0, "end": 5, "text": text}], "words": [{"w": "x", "start": 0, "end": 1}], "duration": 5.0})
     def boom(*a): raise RuntimeError("model missing")
