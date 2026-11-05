@@ -71,3 +71,28 @@ export async function enqueueAndFlush(s: Settings, uri?: string): Promise<{ left
   return { left: left.length, ids, error };
 }
 export const pendingCount = async () => (await getQueue()).length;
+
+// ---------- Đăng ký giọng nói SA (để hệ thống tách lời SA / lời khách) ----------
+export const voiceprintStatus = (s: Settings) =>
+  req<{ enrolled: boolean; n_samples?: number; updated_at?: string }>(s, `/api/voiceprints/${encodeURIComponent(s.saId)}`);
+
+export const deleteVoiceprint = (s: Settings) =>
+  req<{ ok: boolean }>(s, `/api/voiceprints/${encodeURIComponent(s.saId)}`, { method: "DELETE" });
+
+/** Gửi 1 đoạn ghi mẫu (đọc 3 câu, >= 10 giây). consent=true: SA đã bấm đồng ý trên màn hình. */
+export async function enrollVoiceprint(s: Settings, uri: string, replace: boolean): Promise<void> {
+  const res = await FileSystem.uploadAsync(`${s.server}/api/voiceprints/${encodeURIComponent(s.saId)}`, uri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: "audio",
+    mimeType: "audio/m4a",
+    headers: { "x-api-key": s.apiKey },
+    parameters: { consent: "true", replace: replace ? "true" : "false" },
+  });
+  if (res.status === 401) throw new Error("API key không đúng (vào Cài đặt kiểm tra lại)");
+  if (res.status < 200 || res.status >= 300) {
+    let detail = `Server trả lỗi ${res.status}`;
+    try { detail = JSON.parse(res.body).detail || detail; } catch {}
+    throw new Error(detail);
+  }
+}

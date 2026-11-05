@@ -4,7 +4,8 @@ import {
   TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { addOrder, fixOrder, getCatalog, getSession } from "../api";
+import { addOrder, audioUrl, fixOrder, getCatalog, getSession } from "../api";
+import AudioPlayer from "../AudioPlayer";
 import { Button, Card, Pill } from "../components";
 import { fmtTime, inputToPrice, plain, priceToInput, vnd } from "../format";
 import { C, R } from "../theme";
@@ -220,7 +221,7 @@ export default function DetailScreen({ settings, id, onBack }: { settings: Setti
 
             {s.status === "done" && s.orders.length === 0 && !manual && (
               <Card>
-                <Text style={st.oTitle}>Không nghe thấy câu chốt đơn</Text>
+                <Text style={st.oTitle}>Không nhận ra đơn hàng nào</Text>
                 <Text style={[st.muted, { marginVertical: 8, lineHeight: 20 }]}>Nếu khách có mua, hãy nhập tay để Coach vẫn thấy được đơn này.</Text>
                 <Button kind="ghost" label="Nhập đơn thủ công" onPress={() => setManual(true)} />
               </Card>
@@ -231,6 +232,13 @@ export default function DetailScreen({ settings, id, onBack }: { settings: Setti
             {s.status === "done" && s.orders.length === 0 && manual && (
               <OrderCard key="manual" order={null} idx={0} settings={settings} catalog={catalog}
                 onSaved={() => { setManual(false); load(); }} sessionId={s.id} />
+            )}
+
+            {s.status === "done" && !!(s as any).has_audio && (
+              <Card>
+                <Text style={st.oTitle}>Nghe lại cuộc tư vấn</Text>
+                <AudioPlayer uri={audioUrl(settings, s.id)} />
+              </Card>
             )}
 
             {!!s.transcript_text && (

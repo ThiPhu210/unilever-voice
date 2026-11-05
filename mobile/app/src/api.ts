@@ -24,13 +24,18 @@ export const fixOrder = (s: Settings, orderId: number, items: LineIn[]) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(items),
   });
-/** SA/BA tự thêm đơn khi hệ thống không nghe thấy câu chốt đơn. */
+/** SA/BA tự thêm đơn khi hệ thống không nhận ra đơn nào trong cuộc tư vấn. */
 export const addOrder = (s: Settings, sessionId: string, items: LineIn[]) =>
   req(s, `/api/sessions/${sessionId}/orders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(items),
   });
+
+/** URL phát lại file ghi âm của một cuộc tư vấn. Trình phát không gắn được header nên server nhận API key qua ?key=. */
+export const audioUrl = (s: Settings, id: string) =>
+  `${s.server.replace(/\/+$/, "")}/api/sessions/${id}/audio` +
+  (s.apiKey ? `?key=${encodeURIComponent(s.apiKey)}` : "");
 
 async function uploadOne(s: Settings, p: Pending): Promise<string> {
   // Không dùng FormData + {uri,name,type}: fetch của Expo SDK mới báo "Unsupported FormDataPart implementation".
