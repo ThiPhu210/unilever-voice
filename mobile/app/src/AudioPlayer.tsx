@@ -32,7 +32,7 @@ export default function AudioPlayer({ uri }: { uri: string }) {
         <TouchableOpacity style={st.btn} onPress={() => skip(-10)} disabled={!status.isLoaded} accessibilityRole="button" accessibilityLabel="Lùi 10 giây">
           <Text style={st.btnT}>−10s</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[st.play, !status.isLoaded && { opacity: 0.5 }]} onPress={toggle} disabled={!status.isLoaded}
+        <TouchableOpacity style={st.play} onPress={toggle}
           accessibilityRole="button" accessibilityLabel={status.playing ? "Tạm dừng" : "Nghe"}>
           <Text style={st.playT}>{status.playing ? "❚❚" : "▶"}</Text>
         </TouchableOpacity>

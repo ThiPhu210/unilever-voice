@@ -37,6 +37,22 @@ export const audioUrl = (s: Settings, id: string) =>
   `${s.server.replace(/\/+$/, "")}/api/sessions/${id}/audio` +
   (s.apiKey ? `?key=${encodeURIComponent(s.apiKey)}` : "");
 
+/** Tải file ghi âm của một cuộc tư vấn về bộ nhớ đệm (gửi API key bằng header) rồi trả về đường dẫn file trên máy.
+ *  Phát file local ổn định hơn stream trực tiếp (không lo Range, HTTP cleartext, header...), và báo lỗi rõ ràng. */
+export async function downloadAudio(s: Settings, id: string): Promise<string> {
+  if (!s.server) throw new Error("Chưa cấu hình địa chỉ server (tab Cài đặt)");
+  const dest = `${FileSystem.cacheDirectory}audio-${id}.m4a`;
+  const info = await FileSystem.getInfoAsync(dest);
+  if (info.exists && (info as any).size > 0) return dest;
+  const res = await FileSystem.downloadAsync(`${s.server}/api/sessions/${id}/audio`, dest, { headers: { "x-api-key": s.apiKey } });
+  if (res.status === 401) throw new Error("API key không đúng");
+  if (res.status !== 200) {
+    await FileSystem.deleteAsync(dest, { idempotent: true });
+    throw new Error(`Server trả lỗi ${res.status}`);
+  }
+  return res.uri;
+}
+
 async function uploadOne(s: Settings, p: Pending): Promise<string> {
   // Không dùng FormData + {uri,name,type}: fetch của Expo SDK mới báo "Unsupported FormDataPart implementation".
   // uploadAsync gửi multipart trực tiếp từ file trên máy (không nạp cả file vào RAM).

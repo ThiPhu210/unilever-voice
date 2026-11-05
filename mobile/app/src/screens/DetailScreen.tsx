@@ -4,7 +4,7 @@ import {
   TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { addOrder, audioUrl, fixOrder, getCatalog, getSession } from "../api";
+import { addOrder, downloadAudio, fixOrder, getCatalog, getSession } from "../api";
 import AudioPlayer from "../AudioPlayer";
 import { Button, Card, Pill } from "../components";
 import { fmtTime, inputToPrice, plain, priceToInput, vnd } from "../format";
@@ -179,6 +179,34 @@ function OrderCard({ order, idx, settings, catalog, onSaved, sessionId }: {
   );
 }
 
+/** Tải file ghi âm từ server về máy rồi mới phát; lỗi thì hiện rõ lý do + nút thử lại. */
+function ServerAudio({ settings, id }: { settings: Settings; id: string }) {
+  const [uri, setUri] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  const [tries, setTries] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    setUri(null); setErr("");
+    downloadAudio(settings, id)
+      .then((u) => alive && setUri(u))
+      .catch((e) => alive && setErr(String(e?.message || e)));
+    return () => { alive = false; };
+  }, [settings, id, tries]);
+  if (uri) return <AudioPlayer uri={uri} />;
+  if (err) return (
+    <View>
+      <Text style={{ color: C.red, marginTop: 8, lineHeight: 20 }}>Không tải được âm thanh: {err}</Text>
+      <Button kind="ghost" label="Thử lại" onPress={() => setTries((t) => t + 1)} style={{ marginTop: 10 }} />
+    </View>
+  );
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 }}>
+      <ActivityIndicator color={C.brand} />
+      <Text style={st.muted}>Đang tải âm thanh...</Text>
+    </View>
+  );
+}
+
 export default function DetailScreen({ settings, id, onBack }: { settings: Settings; id: string; onBack: () => void }) {
   const insets = useSafeAreaInsets();
   const [s, setS] = useState<SessionDetail | null>(null);
@@ -237,7 +265,7 @@ export default function DetailScreen({ settings, id, onBack }: { settings: Setti
             {s.status === "done" && !!(s as any).has_audio && (
               <Card>
                 <Text style={st.oTitle}>Nghe lại cuộc tư vấn</Text>
-                <AudioPlayer uri={audioUrl(settings, s.id)} />
+                <ServerAudio settings={settings} id={s.id} />
               </Card>
             )}
 
