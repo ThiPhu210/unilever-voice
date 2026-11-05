@@ -45,7 +45,10 @@ class Catalog:
         return ", ".join(s["name"] for s in self.skus.values())
 
     def match(self, words: list[str]) -> dict:
-        size = next((w for w in words if SIZE_RE.match(w)), None)
+        # Có thể có NHIỀU "size" trong một dòng khi ASR chèn rác ("1 .5Kg BS ngừa sâu răng 100g"): chỉ cần MỘT size
+        # khớp với alias là đủ (không phạt); chỉ phạt khi KHÔNG size nào khớp. Trước đây chỉ lấy size đầu tiên -> rác thắng.
+        sizes = [w for w in words if SIZE_RE.match(w)]
+        size = sizes[-1] if sizes else None   # size "chính" = size cuối (mẫu câu: số lượng, tên, dung tích)
         plain = [w for w in words if not SIZE_RE.match(w)]
         ordered = " ".join(plain)
         sorted_ = " ".join(sorted(plain))
@@ -56,10 +59,10 @@ class Catalog:
             a_sorted = " ".join(sorted(a_words.split()))
             s = 0.6 * fuzz.token_set_ratio(sorted_, a_sorted) + 0.4 * fuzz.token_sort_ratio(sorted_, a_sorted)
             s = max(s, fuzz.ratio(compact, a_words.replace(" ", "")))
-            if size:
+            if sizes:
                 if a_size is None:
                     s *= 0.9
-                elif a_size != size:
+                elif a_size not in sizes:
                     s *= 0.6
             best[sku_id] = max(best.get(sku_id, 0.0), s)
 
