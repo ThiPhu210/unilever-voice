@@ -82,7 +82,8 @@ def test_khong_co_chot():
 
 
 def test_mo_ho_can_xac_nhan():
-    o = run("vậy mình chốt 2 omo.")["orders"][0]
+    # Thiếu dung tích: Sunsilk "mềm mượt diệu kỳ" có nhiều SKU (gội 170g/600g/850g, xả 600g) gần như hoà điểm
+    o = run("vậy mình chốt 2 sunsilk mềm mượt diệu kỳ.")["orders"][0]
     assert o["needs_review"] and o["items"][0]["need_confirm"]
     assert len(o["items"][0]["candidates"]) == 3
 
