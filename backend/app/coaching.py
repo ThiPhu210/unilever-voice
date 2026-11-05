@@ -8,7 +8,7 @@ CHECKS = [
     ("promo", "Giới thiệu khuyến mãi", r"\b(khuyen mai|giam gia|tang kem|uu dai|combo|qua tang)\b"),
     ("upsell", "Gợi ý mua thêm / bán kèm", r"\b(mua them|lay them|dung kem|di kem|ket hop|size lon|loai lon|tiet kiem hon)\b"),
 ]
-CLOSING_TEMPLATE = r"cam on.{0,60}\bch[oua]t\b"
+CLOSING_TEMPLATE = r"\b(chot|choc|chut|chott|chaut|chop|chot)\b"
 
 OBJECTIONS = {
     "price": ("Chê giá đắt", r"\b(dat qua|hoi dat|dat vay|mac qua|hoi mac|mac vay|gia cao|qua tien)\b"),

@@ -26,23 +26,18 @@ ASR_CHOT_VARIANTS = {"chau", "chaut", "chao"}
 # "con chau" = con cháu -> không coi "con" là ngữ cảnh cho nhóm biến thể này
 CLOSE_PREV_STRICT = CLOSE_PREV - {"con"}
 
+CHOT_SAFE = {"chot", "choc", "chut", "chott"}   # biến thể không đụng từ thường
+ASR_CHOT_VARIANTS = {"chau", "chaut", "chao"}   # trùng "cháu", "chào" -> vẫn cần ngữ cảnh
 
 def find_closings(text: str) -> list[dict]:
-    """Tìm các vị trí 'chốt' (chịu lỗi ASR như chót/chốc/chấu) trong text đã normalize."""
+    """Tìm vị trí 'chốt đơn' (chịu lỗi ASR). 'chot' đúng thì nhận luôn; biến thể fuzzy phải đi kèm chữ 'don' ngay sau."""
     hits = []
     for m in re.finditer(r"\b[a-z]{3,5}\b", text):
         tok = m.group()
-        exact = tok == "chot"
-        variant = tok in ASR_CHOT_VARIANTS
-        if not exact and not variant and fuzz.ratio(tok, "chot") < 60:
+        if tok != "chot" and tok not in ASR_CHOT_VARIANTS and fuzz.ratio(tok, "chot") < 60:
             continue
-        before = text[max(0, m.start() - 60):m.start()]
-        prev = before.split()[-1] if before.split() else ""
-        if variant:
-            ok = prev in CLOSE_PREV_STRICT or "cam on" in before
-        else:
-            ok = exact or prev in CLOSE_PREV or "cam on" in before
-        if ok:
+        nxt = text[m.end():].split()[:1]
+        if tok == "chot" or (nxt and nxt[0] == "don"):
             hits.append(m)
     out = []
     for k, m in enumerate(hits):
