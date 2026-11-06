@@ -1,4 +1,3 @@
-import hmac
 import json
 import os
 import threading
@@ -11,6 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import db, speaker, stats
+from .auth import Principal, admin_only, owns, principal, router as auth_router
 from .coaching import analyze
 from .parser import Catalog, parse_transcript
 
@@ -22,18 +22,8 @@ db.sync_skus(catalog.skus, catalog.rows)
 _asr_lock = threading.Semaphore(1)  # chỉ chạy 1 phiên ASR một lúc để không tràn RAM
 
 
-def auth(request: Request):
-    """Nếu đặt biến môi trường API_KEY thì mọi request (trừ /api/health) phải kèm
-    header X-API-Key (hoặc ?key= cho thẻ <audio>)."""
-    key = os.getenv("API_KEY", "")
-    if not key or request.url.path == "/api/health":
-        return
-    got = request.headers.get("x-api-key") or request.query_params.get("key") or ""
-    if not hmac.compare_digest(got, key):
-        raise HTTPException(401, "invalid api key")
-
-
-app = FastAPI(title="Unilever Voice Coach", dependencies=[Depends(auth)])
+app = FastAPI(title="Unilever Voice Coach", dependencies=[Depends(principal)])
+app.include_router(auth_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -94,7 +84,10 @@ async def create_session(
     sa_id: str = Form("sa01"),
     sa_name: str = Form("SA Demo"),
     store: str = Form(""),
+    p: Principal = Depends(principal),
 ):
+    if p.kind == "ba":   # BA đã đăng nhập: danh tính lấy từ token, không tin sa_id/sa_name app gửi lên
+        sa_id, sa_name, store = p.sa_id, p.sa_name, (store or p.store)
     sid = uuid.uuid4().hex[:12]
     ext = os.path.splitext(audio.filename or "")[1] or ".m4a"
     path = os.path.join(AUDIO_DIR, sid + ext)
@@ -118,14 +111,16 @@ class TextIn(BaseModel):
 
 
 @app.post("/api/parse-text")
-def parse_text(body: TextIn):
+def parse_text(body: TextIn, p: Principal = Depends(principal)):
     """Công cụ dev: thử parser bằng text, không lưu DB."""
+    admin_only(p)
     return parse_transcript(body.transcript, catalog)
 
 
 @app.post("/api/sessions/text")
-def create_session_from_text(body: TextIn):
+def create_session_from_text(body: TextIn, p: Principal = Depends(principal)):
     """Tạo session từ transcript (để thử web Coach khi chưa có ASR)."""
+    admin_only(p)
     sid = uuid.uuid4().hex[:12]
     created = (datetime.now(timezone.utc) - timedelta(days=max(0, min(body.days_ago, 365)))).strftime("%Y-%m-%d %H:%M:%S")
     db.execute(
@@ -147,9 +142,12 @@ def _orders(sid: str):
 
 
 @app.get("/api/sessions")
-def list_sessions(sa_id: str | None = None, status: str | None = None, limit: int = 100):
+def list_sessions(sa_id: str | None = None, status: str | None = None, limit: int = 100,
+                  p: Principal = Depends(principal)):
     where, args = [], []
-    if sa_id:
+    if p.kind == "ba":   # BA chỉ thấy cuộc tư vấn của mình (bỏ qua sa_id client gửi)
+        where.append("lower(sa_id)=?"); args.append(p.sa_id.lower())
+    elif sa_id:
         where.append("sa_id=?"); args.append(sa_id)
     if status:
         where.append("status=?"); args.append(status)
@@ -181,9 +179,9 @@ def list_sessions(sa_id: str | None = None, status: str | None = None, limit: in
 
 
 @app.get("/api/sessions/{sid}")
-def get_session(sid: str):
+def get_session(sid: str, p: Principal = Depends(principal)):
     rows = db.query("SELECT * FROM sessions WHERE id=?", (sid,))
-    if not rows:
+    if not rows or not owns(p, rows[0]["sa_id"]):
         raise HTTPException(404, "not found")
     s = rows[0]
     s["segments"] = json.loads(s.pop("segments_json") or "[]")
@@ -196,9 +194,9 @@ def get_session(sid: str):
 
 
 @app.get("/api/sessions/{sid}/audio")
-def get_audio(sid: str):
-    rows = db.query("SELECT audio_path FROM sessions WHERE id=?", (sid,))
-    if not rows or not rows[0]["audio_path"] or not os.path.exists(rows[0]["audio_path"]):
+def get_audio(sid: str, p: Principal = Depends(principal)):
+    rows = db.query("SELECT audio_path, sa_id FROM sessions WHERE id=?", (sid,))
+    if not rows or not owns(p, rows[0]["sa_id"]) or not rows[0]["audio_path"] or not os.path.exists(rows[0]["audio_path"]):
         raise HTTPException(404, "no audio")
     return FileResponse(rows[0]["audio_path"])
 
@@ -227,9 +225,10 @@ def _clean_items(items: list[ItemFix]) -> list[dict]:
 
 
 @app.put("/api/orders/{order_id}/items")
-def fix_order(order_id: int, items: list[ItemFix]):
+def fix_order(order_id: int, items: list[ItemFix], p: Principal = Depends(principal)):
     """SA/BA chạm sửa lại SKU / số lượng / giá (hoặc bổ sung giá quên nói) trên app."""
-    if not db.query("SELECT 1 FROM orders WHERE id=?", (order_id,)):
+    own = db.query("SELECT s.sa_id FROM orders o JOIN sessions s ON s.id=o.session_id WHERE o.id=?", (order_id,))
+    if not own or not owns(p, own[0]["sa_id"]):
         raise HTTPException(404, "order not found")
     fixed = _clean_items(items)
     db.execute("UPDATE orders SET items_json=?, needs_review=0, reviewed=1 WHERE id=?",
@@ -238,9 +237,10 @@ def fix_order(order_id: int, items: list[ItemFix]):
 
 
 @app.post("/api/sessions/{sid}/orders")
-def add_order(sid: str, items: list[ItemFix]):
+def add_order(sid: str, items: list[ItemFix], p: Principal = Depends(principal)):
     """SA/BA tự thêm đơn khi hệ thống không nghe thấy câu chốt đơn (đã được SA xác nhận)."""
-    if not db.query("SELECT 1 FROM sessions WHERE id=?", (sid,)):
+    own = db.query("SELECT sa_id FROM sessions WHERE id=?", (sid,))
+    if not own or not owns(p, own[0]["sa_id"]):
         raise HTTPException(404, "session not found")
     fixed = _clean_items(items)
     oid = db.execute(
@@ -251,8 +251,18 @@ def add_order(sid: str, items: list[ItemFix]):
 
 
 # ---------- Đăng ký giọng nói SA ----------
+def _own_voice_id(p: Principal, sa_id: str) -> str:
+    """BA chỉ được đụng vào dấu giọng của chính mình; luôn dùng mã chuẩn từ token để khớp với sessions.sa_id."""
+    if p.kind != "ba":
+        return sa_id
+    if sa_id.lower() != p.sa_id.lower():
+        raise HTTPException(403, "Chỉ được thao tác dấu giọng của chính bạn")
+    return p.sa_id
+
+
 @app.get("/api/voiceprints/{sa_id}")
-def voiceprint_status(sa_id: str):
+def voiceprint_status(sa_id: str, p: Principal = Depends(principal)):
+    sa_id = _own_voice_id(p, sa_id)
     r = db.query("SELECT n_samples, consent_at, updated_at FROM voiceprints WHERE sa_id=?", (sa_id,))
     return {"enrolled": bool(r), **(r[0] if r else {})}
 
@@ -263,8 +273,10 @@ async def enroll_voiceprint(
     audio: list[UploadFile] = File(...),
     consent: bool = Form(False),
     replace: bool = Form(False),
+    p: Principal = Depends(principal),
 ):
     """SA ghi 2-3 đoạn đọc mẫu (tổng >= 8s có tiếng) -> lưu dấu giọng. Không lưu file âm thanh."""
+    sa_id = _own_voice_id(p, sa_id)
     if not consent:
         raise HTTPException(400, "Cần SA đồng ý (consent=true) trước khi lưu dấu giọng")
     if db.query("SELECT 1 FROM voiceprints WHERE sa_id=?", (sa_id,)) and not replace:
@@ -302,23 +314,27 @@ async def enroll_voiceprint(
 
 
 @app.delete("/api/voiceprints/{sa_id}")
-def delete_voiceprint(sa_id: str):
+def delete_voiceprint(sa_id: str, p: Principal = Depends(principal)):
     """SA rút lại đồng ý -> xoá dấu giọng."""
+    sa_id = _own_voice_id(p, sa_id)
     db.execute("DELETE FROM voiceprints WHERE sa_id=?", (sa_id,))
     return {"ok": True}
 
 
 @app.get("/api/stats/top-skus")
-def top_skus(days: int = 7, include_declined: bool = False):
+def top_skus(days: int = 7, include_declined: bool = False, p: Principal = Depends(principal)):
+    admin_only(p)
     return stats.top_skus(days, include_declined)
 
 
 @app.get("/api/stats/skus")
-def sku_stats(days: int = 14):
+def sku_stats(days: int = 14, p: Principal = Depends(principal)):
     """Xu hướng mua sắm theo SKU: số lượng, doanh thu, giá TB, theo từng ngày."""
+    admin_only(p)
     return stats.sku_stats(days)
 
 
 @app.get("/api/stats/overview")
-def overview(days: int = 7):
+def overview(days: int = 7, p: Principal = Depends(principal)):
+    admin_only(p)
     return stats.overview(days)

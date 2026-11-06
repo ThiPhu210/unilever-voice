@@ -79,6 +79,13 @@ CREATE INDEX IF NOT EXISTS idx_staff_store ON staff(store_code);
 CREATE TABLE IF NOT EXISTS voiceprints(
     sa_id TEXT PRIMARY KEY, embedding_json TEXT NOT NULL, dim INTEGER, model TEXT,
     n_samples INTEGER, consent_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+-- Đăng nhập BA (app/auth.py). ba_key = mã BA viết thường. Mật khẩu: băm scrypt (hex) + salt riêng, token chỉ lưu SHA-256.
+CREATE TABLE IF NOT EXISTS ba_auth(
+    ba_key TEXT PRIMARY KEY, pw_hash TEXT NOT NULL, pw_salt TEXT NOT NULL,
+    fails INTEGER DEFAULT 0, locked_until TEXT DEFAULT '', updated_at TEXT);
+CREATE TABLE IF NOT EXISTS auth_tokens(
+    token_hash TEXT PRIMARY KEY, ba_key TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_ba ON auth_tokens(ba_key);
 """
 
 

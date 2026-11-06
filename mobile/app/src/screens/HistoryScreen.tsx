@@ -2,12 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { listSessions } from "../api";
-import { Pill } from "../components";
+import { Banner, Pill, Title } from "../components";
 import { fmtTime, isToday, vnd } from "../format";
-import { C, R } from "../theme";
+import { C, R, S, shadow } from "../theme";
 import { SessionRow, Settings } from "../types";
 
 const LABEL: Record<string, string> = { queued: "Đang chờ", processing: "Đang dịch", done: "Đã xong", error: "Lỗi" };
+
+/** Màu vạch bên trái thẻ: đỏ = lỗi, cam = đang xử lý hoặc cần BA làm gì đó, xanh = xong. */
+function accent(r: SessionRow): string {
+  if (r.status === "error") return C.red;
+  if (r.status !== "done" || r.pending_review > 0 || r.missing_price > 0) return C.brand;
+  return C.green;
+}
 
 export default function HistoryScreen({ settings, refreshKey, onOpen }: { settings: Settings; refreshKey: number; onOpen: (id: string) => void }) {
   const insets = useSafeAreaInsets();
@@ -44,23 +51,26 @@ export default function HistoryScreen({ settings, refreshKey, onOpen }: { settin
       data={rows}
       keyExtractor={(r) => r.id}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={C.brand} />}
-      contentContainerStyle={{ padding: 20, paddingTop: insets.top + 16, paddingBottom: 40 }}
+      contentContainerStyle={{ padding: S.page, paddingTop: insets.top + S.lg, paddingBottom: 40 }}
       ListHeaderComponent={
-        <View style={{ marginBottom: 8 }}>
-          <Text style={st.h}>Lịch sử tư vấn</Text>
-          <View style={st.sum}>
-            <Stat n={String(today.sessions)} l="cuộc hôm nay" />
-            <Stat n={String(today.orders)} l="đơn chốt" />
-            <Stat n={String(today.units)} l="sản phẩm" />
-            <Stat n={vnd(today.revenue)} l="doanh thu" wide />
+        <View style={{ marginBottom: S.sm }}>
+          <Title>Lịch sử tư vấn</Title>
+          <View style={st.hero}>
+            <Text style={st.heroL}>Doanh thu hôm nay</Text>
+            <Text style={st.heroN} numberOfLines={1} adjustsFontSizeToFit>{vnd(today.revenue)}</Text>
+            <View style={st.stats}>
+              <Stat n={String(today.sessions)} l="cuộc tư vấn" />
+              <Stat n={String(today.orders)} l="đơn chốt" />
+              <Stat n={String(today.units)} l="sản phẩm" />
+            </View>
           </View>
-          {todo > 0 && <Text style={st.todo}>{todo} cuộc cần bạn xác nhận SKU hoặc nhập giá</Text>}
-          {!!err && <Text style={st.err}>{err}</Text>}
+          {todo > 0 && <Banner tone="warn" text={`${todo} cuộc cần bạn xác nhận SKU hoặc nhập giá`} style={{ marginTop: S.md, marginBottom: 0 }} />}
+          {!!err && <Banner tone="bad" text={err} style={{ marginTop: S.md, marginBottom: 0 }} />}
         </View>
       }
       ListEmptyComponent={<Text style={st.empty}>{err ? "" : "Chưa có cuộc tư vấn nào. Qua tab Ghi âm để bắt đầu."}</Text>}
       renderItem={({ item: r }) => (
-        <TouchableOpacity style={st.card} onPress={() => onOpen(r.id)} accessibilityRole="button" activeOpacity={0.8}>
+        <TouchableOpacity style={[st.card, { borderLeftColor: accent(r) }]} onPress={() => onOpen(r.id)} accessibilityRole="button" activeOpacity={0.8}>
           <View style={st.row}>
             <Text style={st.time}>{fmtTime(r.created_at)}</Text>
             <Text style={[st.badge, r.status === "error" && { color: C.red }]}>{LABEL[r.status] || r.status}</Text>
@@ -80,28 +90,28 @@ export default function HistoryScreen({ settings, refreshKey, onOpen }: { settin
   );
 }
 
-const Stat = ({ n, l, wide }: { n: string; l: string; wide?: boolean }) => (
-  <View style={[st.stat, wide && { flex: 1.6 }]}>
-    <Text style={st.statN} numberOfLines={1} adjustsFontSizeToFit>{n}</Text>
+const Stat = ({ n, l }: { n: string; l: string }) => (
+  <View style={st.stat}>
+    <Text style={st.statN}>{n}</Text>
     <Text style={st.statL}>{l}</Text>
   </View>
 );
 
 const st = StyleSheet.create({
-  h: { fontSize: 28, fontWeight: "800", color: C.ink },
-  sum: { flexDirection: "row", gap: 8, marginTop: 14, backgroundColor: C.tint, borderRadius: R.card, padding: 14 },
+  hero: { backgroundColor: C.tint, borderRadius: R.card, padding: S.lg + 2 },
+  heroL: { color: C.muted, fontWeight: "700", fontSize: 13 },
+  heroN: { fontSize: 34, fontWeight: "800", color: C.ink, marginTop: 2 },
+  stats: { flexDirection: "row", marginTop: S.md, paddingTop: S.md, borderTopWidth: 1, borderTopColor: "rgba(58,35,22,0.12)" },
   stat: { flex: 1 },
   statN: { fontSize: 20, fontWeight: "800", color: C.ink },
-  statL: { fontSize: 11.5, color: C.muted, marginTop: 2 },
-  todo: { color: C.amber, fontWeight: "700", marginTop: 12 },
-  err: { color: C.red, marginTop: 10 },
+  statL: { fontSize: 12, color: C.muted, marginTop: 2 },
   empty: { color: C.muted, textAlign: "center", marginTop: 40, lineHeight: 21 },
-  card: { backgroundColor: C.card, borderRadius: R.card, padding: 14, marginTop: 10, borderWidth: 1.5, borderColor: C.line },
-  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 8 },
+  card: { backgroundColor: C.card, borderRadius: R.card, padding: S.lg, marginTop: S.md, borderWidth: 1, borderColor: C.line, borderLeftWidth: 5, ...shadow },
+  row: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: S.sm },
   time: { color: C.ink, fontWeight: "800", fontSize: 16 },
   badge: { color: C.muted, fontSize: 12, fontWeight: "600" },
   store: { color: C.muted, marginTop: 2 },
-  sub: { color: C.muted, marginTop: 8 },
-  rev: { color: C.ink, fontWeight: "800", marginTop: 8 },
-  tags: { flexDirection: "row", gap: 6, marginTop: 8, flexWrap: "wrap" },
+  sub: { color: C.muted, marginTop: S.sm },
+  rev: { color: C.ink, fontWeight: "800", marginTop: S.sm },
+  tags: { flexDirection: "row", gap: 6, marginTop: S.sm, flexWrap: "wrap" },
 });

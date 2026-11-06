@@ -1,17 +1,52 @@
-import { CatalogItem, LineIn, SessionDetail, SessionRow, Settings } from "./types";
+import { AuthResult, AuthStatus, CatalogItem, LineIn, SessionDetail, SessionRow, Settings } from "./types";
 import * as FileSystem from "expo-file-system/legacy";
 import { getQueue, Pending, setQueue } from "./storage";
 
+// ---------- Phiên đăng nhập ----------
+// Mọi request đã đăng nhập gửi "Authorization: Bearer <token>". Server trả 401 (token hết hạn / bị thu hồi)
+// thì gọi handler này để App đưa người dùng về màn đăng nhập.
+let onUnauthorized: (() => void) | null = null;
+export const setUnauthorizedHandler = (fn: (() => void) | null) => { onUnauthorized = fn; };
+const EXPIRED = "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.";
+function expired(): Error { onUnauthorized?.(); return new Error(EXPIRED); }
+const bearer = (s: Settings): Record<string, string> => (s.token ? { Authorization: `Bearer ${s.token}` } : {});
+
 async function req<T>(s: Settings, path: string, init: RequestInit = {}): Promise<T> {
-  if (!s.server) throw new Error("Chưa cấu hình địa chỉ server (tab Cài đặt)");
+  if (!s.server) throw new Error("Chưa cấu hình địa chỉ server");
   const res = await fetch(s.server + path, {
     ...init,
-    headers: { ...(init.headers || {}), "x-api-key": s.apiKey },
+    headers: { ...(init.headers || {}), ...bearer(s) },
   });
-  if (res.status === 401) throw new Error("API key không đúng");
+  if (res.status === 401) throw expired();
   if (!res.ok) throw new Error(`Lỗi server ${res.status}`);
   return res.json();
 }
+
+// ---------- Đăng nhập (chưa có token) ----------
+async function authCall<T>(server: string, path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try { res = await fetch(server + path, init); }
+  catch { throw new Error(`Không kết nối được tới ${server}. Kiểm tra mạng và địa chỉ server.`); }
+  let body: any = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok) throw new Error(typeof body?.detail === "string" ? body.detail : `Lỗi server ${res.status}`);
+  return body as T;
+}
+const postJson = (body: object): RequestInit => ({
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+
+/** Bước 1: mã BA này chưa được cấp / lần đầu (cần tự đặt mật khẩu) / đã có mật khẩu? */
+export const checkBa = (server: string, saId: string) =>
+  authCall<{ status: AuthStatus }>(server, `/api/auth/status?sa_id=${encodeURIComponent(saId)}`);
+export const login = (server: string, saId: string, password: string) =>
+  authCall<AuthResult>(server, "/api/auth/login", postJson({ sa_id: saId, password }));
+/** Lần đầu: BA tự đặt mật khẩu (chỉ server chấp nhận khi mã này chưa có mật khẩu). Trả luôn token. */
+export const setPassword = (server: string, saId: string, password: string) =>
+  authCall<AuthResult>(server, "/api/auth/set-password", postJson({ sa_id: saId, password }));
+/** Thu hồi token trên server. Chỉ cố gắng hết sức: lỗi mạng không được chặn việc đăng xuất trên máy. */
+export const revokeToken = (s: Settings) =>
+  fetch(s.server + "/api/auth/logout", { method: "POST", headers: bearer(s) }).then(() => {}, () => {});
 
 export const ping = (s: Settings) => req<{ ok: boolean; skus: number }>(s, "/api/health");
 export const listSessions = (s: Settings) =>
@@ -32,20 +67,20 @@ export const addOrder = (s: Settings, sessionId: string, items: LineIn[]) =>
     body: JSON.stringify(items),
   });
 
-/** URL phát lại file ghi âm của một cuộc tư vấn. Trình phát không gắn được header nên server nhận API key qua ?key=. */
+/** URL phát lại file ghi âm của một cuộc tư vấn. Trình phát không gắn được header nên server nhận token qua ?token=. */
 export const audioUrl = (s: Settings, id: string) =>
   `${s.server.replace(/\/+$/, "")}/api/sessions/${id}/audio` +
-  (s.apiKey ? `?key=${encodeURIComponent(s.apiKey)}` : "");
+  (s.token ? `?token=${encodeURIComponent(s.token)}` : "");
 
-/** Tải file ghi âm của một cuộc tư vấn về bộ nhớ đệm (gửi API key bằng header) rồi trả về đường dẫn file trên máy.
+/** Tải file ghi âm của một cuộc tư vấn về bộ nhớ đệm (gửi token bằng header) rồi trả về đường dẫn file trên máy.
  *  Phát file local ổn định hơn stream trực tiếp (không lo Range, HTTP cleartext, header...), và báo lỗi rõ ràng. */
 export async function downloadAudio(s: Settings, id: string): Promise<string> {
-  if (!s.server) throw new Error("Chưa cấu hình địa chỉ server (tab Cài đặt)");
+  if (!s.server) throw new Error("Chưa cấu hình địa chỉ server");
   const dest = `${FileSystem.cacheDirectory}audio-${id}.m4a`;
   const info = await FileSystem.getInfoAsync(dest);
   if (info.exists && (info as any).size > 0) return dest;
-  const res = await FileSystem.downloadAsync(`${s.server}/api/sessions/${id}/audio`, dest, { headers: { "x-api-key": s.apiKey } });
-  if (res.status === 401) throw new Error("API key không đúng");
+  const res = await FileSystem.downloadAsync(`${s.server}/api/sessions/${id}/audio`, dest, { headers: bearer(s) });
+  if (res.status === 401) throw expired();
   if (res.status !== 200) {
     await FileSystem.deleteAsync(dest, { idempotent: true });
     throw new Error(`Server trả lỗi ${res.status}`);
@@ -61,10 +96,10 @@ async function uploadOne(s: Settings, p: Pending): Promise<string> {
     uploadType: FileSystem.FileSystemUploadType.MULTIPART,
     fieldName: "audio",
     mimeType: "audio/m4a",
-    headers: { "x-api-key": s.apiKey },
+    headers: bearer(s),
     parameters: { sa_id: p.saId, sa_name: p.saName, store: p.store },
   });
-  if (res.status === 401) throw new Error("API key không đúng (vào Cài đặt kiểm tra lại)");
+  if (res.status === 401) throw expired();
   if (res.status < 200 || res.status >= 300) throw new Error(`Server trả lỗi ${res.status}`);
   return JSON.parse(res.body).id as string;
 }
@@ -76,8 +111,9 @@ export async function enqueueAndFlush(s: Settings, uri?: string): Promise<{ left
   const left: Pending[] = [];
   const ids: string[] = [];
   let error: string | undefined;
-  if (!s.server) return { left: q.length, ids, error: "Chưa nhập địa chỉ server (tab Cài đặt)" };
+  if (!s.server) return { left: q.length, ids, error: "Chưa nhập địa chỉ server" };
   for (const p of q) {
+    if (p.saId && p.saId !== s.saId) { left.push(p); continue; }   // bản ghi của BA khác: giữ lại, chỉ gửi khi BA đó đăng nhập
     try {
       ids.push(await uploadOne(s, p));
     } catch (e: any) {
@@ -107,10 +143,10 @@ export async function enrollVoiceprint(s: Settings, uri: string, replace: boolea
     uploadType: FileSystem.FileSystemUploadType.MULTIPART,
     fieldName: "audio",
     mimeType: "audio/m4a",
-    headers: { "x-api-key": s.apiKey },
+    headers: bearer(s),
     parameters: { consent: "true", replace: replace ? "true" : "false" },
   });
-  if (res.status === 401) throw new Error("API key không đúng (vào Cài đặt kiểm tra lại)");
+  if (res.status === 401) throw expired();
   if (res.status < 200 || res.status >= 300) {
     let detail = `Server trả lỗi ${res.status}`;
     try { detail = JSON.parse(res.body).detail || detail; } catch {}
