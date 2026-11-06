@@ -57,9 +57,15 @@ def _skip_price_lead(toks: list[str], j: int) -> int:
 
 
 def _price_follows(toks: list[str], j: int) -> bool:
-    """Sau toks[j-1] có dấu phẩy rồi tới một mức giá riêng ('..., dạm 86k') không?"""
-    return (j < len(toks) and toks[j] in {",", ";"}
-            and parse_price(toks, _skip_price_lead(toks, j + 1), kg_as_k=True) is not None)
+    """Sau toks[j-1] có một mức giá riêng không? Có dấu phẩy ("..., dạm 86k") hoặc chữ dẫn giá không dấu phẩy
+    ("bảo vệ 123 giá 48 nghìn")."""
+    if j >= len(toks):
+        return False
+    comma = toks[j] in {",", ";"}
+    k = _skip_price_lead(toks, j + 1 if comma else j)
+    if not comma and k == j:   # không dấu phẩy và không có "giá/dạ" -> không đủ chắc
+        return False
+    return parse_price(toks, k, kg_as_k=True) is not None
 
 
 def _starts_item(toks: list[str], i: int) -> bool:

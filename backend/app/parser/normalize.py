@@ -15,6 +15,19 @@ _SPLIT_SIZE = re.compile(
 _QTY_CONTEXT = re.compile(r"(?:^|[,;.?!]\s*|(?<![a-z])\d[0-9.,]*[a-z]*\s+)$")
 
 
+# Dung tích thập phân bị ASR tách rời cả đơn vị: "3 ,8 ki" / "3,8 ki" / "3 .8 kg" -> "3.8kg".
+# Vẫn áp dụng kiểm tra "số lượng" ở trên (đầu câu / sau dấu câu / sau giá-dung tích thì KHÔNG nối).
+_SPLIT_SIZE_SP = re.compile(
+    r"(?<![\d.,])(\d+)\s*([.,])(\d+)\s+(kg|ky|ki|g|gr|gam|gram|ml|l|lit|lt)(?![a-z])"
+)
+
+
+def _join_size_sp(m: re.Match) -> str:
+    if _QTY_CONTEXT.search(m.string[:m.start()]):
+        return m.group(0)
+    return f"{m.group(1)}.{m.group(3)}{m.group(4)}"
+
+
 def _join_size(m: re.Match) -> str:
     if _QTY_CONTEXT.search(m.string[:m.start()]):
         return m.group(0)
@@ -29,4 +42,5 @@ def normalize(text: str) -> str:
     # Số lượng nằm ở đầu câu, sau dấu phẩy/chấm, hoặc ngay sau một giá/dung tích ("92kg 2 .2L, HAZERLIN"):
     # khi đó ".2L" là rác ASR chèn sau số lượng -> KHÔNG nối (nếu nối sẽ thành "2.2l" và mất số lượng).
     t = _SPLIT_SIZE.sub(_join_size, t)
+    t = _SPLIT_SIZE_SP.sub(_join_size_sp, t)
     return re.sub(r"\s+", " ", t).strip()
