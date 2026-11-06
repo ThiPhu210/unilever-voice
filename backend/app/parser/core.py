@@ -51,14 +51,15 @@ def _skip_price_lead(toks: list[str], j: int) -> int:
     k = j
     while k < len(toks) and k - j < 2 and _like_gia(toks[k]):
         k += 1
-    if k > j and parse_price(toks, k):
+    if k > j and parse_price(toks, k, kg_as_k=True):
         return k
     return j
 
 
 def _price_follows(toks: list[str], j: int) -> bool:
     """Sau toks[j-1] có dấu phẩy rồi tới một mức giá riêng ('..., dạm 86k') không?"""
-    return j < len(toks) and toks[j] in {",", ";"} and parse_price(toks, _skip_price_lead(toks, j + 1)) is not None
+    return (j < len(toks) and toks[j] in {",", ";"}
+            and parse_price(toks, _skip_price_lead(toks, j + 1), kg_as_k=True) is not None)
 
 
 def _starts_item(toks: list[str], i: int) -> bool:
@@ -67,6 +68,37 @@ def _starts_item(toks: list[str], i: int) -> bool:
     while j < len(toks) and toks[j] in LEAD_STRIP:
         j += 1
     return j < len(toks) and parse_number(toks, j) is not None
+
+
+KG_PRICE_RE = re.compile(r"\d{1,3}(?:kg|ky|ki)")
+
+
+def _has_size(name: list[str]) -> bool:
+    return any(SIZE_RE.match(w) for w in name)
+
+
+def _kg_is_price(toks: list[str], k: int, name: list[str], after_comma: bool) -> bool:
+    """toks[k] dạng "92kg": ASR nghe "92k" (giá) thành "92Kg" hay đây là dung tích thật ("Sữa tắm 1kg")?
+    Là GIÁ khi: (1) ngay sau nó KHÔNG còn một mức giá khác (nếu còn thì nó là dung tích: "Omo, 3kg, giá 100k"), và
+    (2) tên SKU đã "đủ": đã có dung tích, hoặc ngay trước là chữ "giá/dạ", hoặc (sau dấu phẩy) tên kết thúc bằng số
+    ("Rửa chén 14 trong 1, 86Kg")."""
+    if k >= len(toks) or not KG_PRICE_RE.fullmatch(toks[k]) or not name:
+        return False
+    j = k + 1
+    if j < len(toks) and toks[j] in {",", ";"}:
+        j += 1
+    j = _skip_price_lead(toks, j)
+    if j < len(toks) and parse_price(toks, j, kg_as_k=True):
+        return False
+    return _has_size(name) or name[-1] in PRICE_LEAD or (after_comma and name[-1].isdigit())
+
+
+def _comma_in_name(toks: list[str], i: int, name: list[str]) -> bool:
+    """ASR chèn dấu phẩy giữa tên SKU ("2 Hazeln, Sữa Tắm, Sữa Gạo Hoa Nhài 1kg, 80k"): tên chưa có dung tích và sau
+    dấu phẩy là chữ (không phải số lượng/giá) -> đây không phải ranh giới dòng hàng, bỏ dấu phẩy, giữ tên + số lượng."""
+    j = i + 1
+    return (j < len(toks) and not _has_size(name)
+            and toks[j] not in SEPARATORS and parse_number(toks, j) is None)
 
 
 def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
@@ -86,24 +118,40 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
         if price is not None and t not in SEPARATORS and parse_number(toks, i) is None:
             flush()   # đã có giá -> kết thúc dòng hàng, chữ lan man phía sau không thuộc tên SKU
         if t in SEPARATORS:
+            if t in {",", ";"} and not name and qty is not None:
+                i += 1; continue  # "1 .2L, COMFORT ...": dấu phẩy ngay sau số lượng (+ rác) -> GIỮ số lượng, đừng flush
             if t in {",", ";"} and name and price is None:
-                pr = parse_price(toks, _skip_price_lead(toks, i + 1))  # "800g, giá 65k đồng": ASR chèn dấu phẩy giữa tên SKU và giá
+                k = _skip_price_lead(toks, i + 1)  # "800g, giá 65k đồng": ASR chèn dấu phẩy giữa tên SKU và giá
+                pr = parse_price(toks, k, kg_as_k=(k > i + 1 or _kg_is_price(toks, k, name, True)))  # "..., 92Kg" = 92k
                 if pr:
                     price, i = pr
                     continue
+                if _comma_in_name(toks, i, name):
+                    i += 1; continue
             if t in {"va", "voi"} and name and price is None and not _starts_item(toks, i):
                 name.append(t); i += 1; continue  # "và" nằm trong tên SKU, không phải ranh giới
             flush(); i += 1; continue
         m = SIZE_RE.match(t)
         if m:
+            nxt = toks[i + 1] if i + 1 < n else None
+            if qty is not None and not name and nxt in {",", ";", None}:
+                i += 1; continue  # "2 .2L, HAZERLIN": dung tích rác ASR chèn ngay sau số lượng -> bỏ
+            if price is None and name and _kg_is_price(toks, i, name, False):
+                pr = parse_price(toks, i, kg_as_k=True)  # "... 28g 7Kg 2 ...": ASR bỏ mất dấu phẩy, "7Kg" = 7k
+                if pr:
+                    price, i = pr
+                    continue
             name.append(size_norm(m.group(1), m.group(2))); i += 1; continue
         if t in LEAD_STRIP and not name and qty is None:
             i += 1; continue
+        if (name and price is None and re.fullmatch(r"\d+", t) and i + 2 < n
+                and toks[i + 1] == "trong" and re.fullmatch(r"\d+", toks[i + 2])):
+            name.extend([t, "trong", toks[i + 2]]); i += 3; continue  # "rửa chén 14 trong 1": số nằm trong TÊN, không phải số lượng
         if name and price is None and re.fullmatch(r"\d+", t) and _price_follows(toks, i + 1):
             name.append(t); i += 1; continue  # "bảo vệ 123, giá 48k" / "viên rửa chén 1401, giá 86k": số đứng cuối TÊN, giá nằm sau dấu phẩy
         if not name and qty is None and segs and segs[-1][2] is None:
             k = _skip_price_lead(toks, i)  # giá "mồ côi" ngay sau một dòng đã đóng: gắn lại vào dòng trước, không tạo dòng mới
-            pr = parse_price(toks, k) if (k > i or not re.fullmatch(r"\d+", t)) else None
+            pr = parse_price(toks, k, kg_as_k=k > i) if (k > i or not re.fullmatch(r"\d+", t)) else None
             if pr:
                 segs[-1] = (segs[-1][0], segs[-1][1], pr[0]); i = pr[1]
                 continue
@@ -112,7 +160,12 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             if pr:
                 price, i = pr
                 continue
-        if t == "tam" and name and name[-1] in BATH_PREV:
+        if t == "tam" and name and (
+                name[-1] in BATH_PREV   # "sữa/dầu tắm"
+                # ASR nghe sai chữ đứng trước ("Sỡ Tắm Gạo"): tên chưa có giá, token trước là chữ -> "tắm" là một phần của tên.
+                # Giữ nguyên "tám trăm gam" / "tám mươi" (số đọc thành chữ).
+                or (price is None and not SIZE_RE.match(name[-1])
+                    and not (i + 1 < n and (toks[i + 1] in {"tram", "muoi"} or toks[i + 1] in SIZE_UNIT_MAP)))):
             name.append(t); i += 1; continue
         if not (t in AMBIGUOUS and name):
             p = parse_number(toks, i)

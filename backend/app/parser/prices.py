@@ -12,6 +12,9 @@ UNITS = THOUSAND | MILLION | CURRENCY
 NUM_TOKEN = re.compile(r"^(\d+(?:[.,]\d+)?)([a-z]*)$")
 GROUPED = re.compile(r"^\d{1,3}(?:[.,]\d{3})+$")  # 65.000 / 1,250,000
 
+# ASR hay nghe "92k" thành "92Kg" (k -> kg). Chỉ dùng khi NGỮ CẢNH chắc chắn là vị trí giá (kg_as_k=True).
+KG_AS_K = {"kg", "ky", "ki"}
+
 PRICE_MIN, PRICE_MAX = 500, 50_000_000
 
 
@@ -32,8 +35,9 @@ def _tail_after_thousand(toks: list[str], j: int) -> tuple[int, int]:
     return 0, j
 
 
-def parse_price(toks: list[str], i: int) -> tuple[int, int] | None:
-    """Thử đọc giá tại vị trí i. Trả về (vnd, vị_trí_kế_tiếp) hoặc None."""
+def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, int] | None:
+    """Thử đọc giá tại vị trí i. Trả về (vnd, vị_trí_kế_tiếp) hoặc None.
+    kg_as_k=True: coi "92Kg" (số nguyên 1-3 chữ số + kg/ky/ki) là "92k" = 92.000đ."""
     n = len(toks)
     if i >= n:  # hết câu ngay sau dấu phẩy / chữ "giá" -> không có gì để đọc
         return None
@@ -43,6 +47,8 @@ def parse_price(toks: list[str], i: int) -> tuple[int, int] | None:
         num, suffix = m.groups()
         j = i + 1
         unit = suffix or None
+        if kg_as_k and unit in KG_AS_K and re.fullmatch(r"\d{1,3}", num):
+            unit = "k"
         if unit is not None and unit not in UNITS:
             return None
         if unit is None and j < n and toks[j] in UNITS:
