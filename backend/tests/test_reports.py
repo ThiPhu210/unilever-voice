@@ -1,6 +1,7 @@
 """Barcode trong DB + báo cáo bán hàng SA (JSON xem trước và file Excel)."""
 import csv
 import io
+from datetime import datetime
 import json
 import os
 import sqlite3
@@ -40,7 +41,8 @@ def data():
     _order("rp1", "2026-03-09 16:59:00", "yes", _items((OMO, 9, 65000, 0)))                           # 09/03 23:59 giờ VN: NGOÀI khoảng
     _order("rp2", "2026-03-10 05:00:00", "no", _items((OMO, 5, 65000, 0)))                            # khách từ chối
     _order("rp2", "2026-03-11 05:00:00", "yes", _items((SUNSILK, 3, 40000, 1)), reviewed=1)
-    db.execute("INSERT INTO staff(ess_code,ba_code,name,store_code,updated_at) VALUES('ERPT1','RPT01','An',NULL,'2026-01-01 00:00:00')")
+    db.execute("INSERT INTO stores(ess_store_code,name) VALUES('ST001','=1+1'),('ST002','Cửa hàng B')")
+    db.execute("INSERT INTO staff(ess_code,ba_code,name,store_code,updated_at) VALUES('ERPT1','RPT01','An','ST001','2026-01-01 00:00:00')")
 
 
 def _sales(**kw):
@@ -109,17 +111,22 @@ def test_file_excel():
     openpyxl = pytest.importorskip("openpyxl")   # CI không cài openpyxl thì bỏ qua đúng test này; nên thêm openpyxl vào bước cài của CI
     r = c.get("/api/reports/sales.xlsx", params={**RANGE, "sa_id": "RPT01"})
     assert r.status_code == 200 and "spreadsheetml" in r.headers["content-type"]
-    assert r.headers["content-disposition"] == 'attachment; filename="bao-cao-ban-hang_2026-03-10_2026-03-11_RPT01.xlsx"'
+    assert r.headers["content-disposition"] == 'attachment; filename="report_2026-03-10_2026-03-11_RPT01.xlsx"'
     wb = openpyxl.load_workbook(io.BytesIO(r.content))
-    assert wb.sheetnames == ["Tổng hợp theo SA", "Theo SKU", "Chi tiết"]
-    det = list(wb["Chi tiết"].iter_rows(min_row=2, values_only=True))
+    assert wb.sheetnames == ["Chi tiết", "Tổng hợp theo SA", "Theo SKU"]
+    ws = wb["Chi tiết"]
+    assert [c.value for c in ws[1]][:6] == ["Timestamp", "Mã cửa hàng (Store code)", "Tên cửa hàng", "Tên nhân viên", "Mã nhân viên (BA code)", "Mã đơn hàng"]
+    det = list(ws.iter_rows(min_row=2, values_only=True))
     assert len(det) == 3                                                           # A1 (2 dòng) + A2 (1 dòng)
     first = det[0]
-    assert first[0] == "2026-03-10" and first[1] == "09:00" and first[8] == "8934868136576" and first[11:14] == (2, 65000, 130000)
-    assert det[1][12] is None and det[1][13] is None                               # dòng thiếu giá: để trống, không bịa 0
-    assert wb["Chi tiết"].cell(row=2, column=9).number_format == "@"              # barcode là chữ, không thành 8.93E+12
-    assert wb["Chi tiết"].cell(row=2, column=5).value == "=1+1"
-    assert wb["Chi tiết"].cell(row=2, column=5).data_type == "s"                  # chống công thức độc hại qua tên cửa hàng
+    assert first[0] == datetime(2026, 3, 10, 9, 0, 0)                              # timestamp thật, giờ VN (UTC+7)
+    assert ws.cell(row=2, column=1).number_format == "dd/mm/yyyy hh:mm:ss"
+    assert first[1] == "ST001" and first[2] == "=1+1" and first[3] == "An" and first[4] == "RPT01"
+    assert first[7] == "8934868136576" and first[10:13] == (2, 65000, 130000)      # barcode, số lượng, đơn giá, thành tiền
+    assert det[1][11] is None and det[1][12] is None                               # dòng thiếu giá: để trống, không bịa 0
+    assert ws.cell(row=2, column=8).number_format == "@"                           # barcode là chữ, không thành 8.93E+12
+    assert ws.cell(row=2, column=3).data_type == "s"                               # chống công thức độc hại qua tên cửa hàng
+    assert det[2][0] == datetime(2026, 3, 11, 0, 30, 0)                            # đơn 17:30 UTC -> 00:30 hôm sau giờ VN
     tot = list(wb["Tổng hợp theo SA"].iter_rows(min_row=8, values_only=True))
     assert tot[0][:2] == ("RPT01", "An") and tot[-1][0] == "Tổng cộng" and tot[-1][6] == 200000
     sku = {row[1]: row for row in wb["Theo SKU"].iter_rows(min_row=2, values_only=True)}

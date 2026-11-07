@@ -43,7 +43,7 @@ export default function Reports({ onAuthError }: { onAuthError: () => void }) {
 
   async function download() {
     setBusy(true); setErr("");
-    try { await downloadFile(`/api/reports/sales.xlsx?${query}`, "bao-cao-ban-hang.xlsx"); }
+    try { await downloadFile(`/api/reports/sales.xlsx?${query}`, "report.xlsx"); }
     catch (e) { fail(e); }
     finally { setBusy(false); }
   }
@@ -56,7 +56,7 @@ export default function Reports({ onAuthError }: { onAuthError: () => void }) {
       <header className="page-head">
         <div>
           <h1>Báo cáo bán hàng</h1>
-          <p className="muted">Xuất doanh số của SA/BA theo ngày, theo SKU (kèm barcode) ra file Excel. Ngày tính theo giờ Việt Nam.</p>
+          <p className="muted">Xuất file Excel gồm: timestamp, mã cửa hàng, tên nhân viên, mã BA, mã đơn, sản phẩm, số lượng, đơn giá từng sản phẩm và thành tiền. Giờ tính theo giờ Việt Nam.</p>
         </div>
         <div className="tabs" role="group" aria-label="Chọn nhanh khoảng ngày">
           {PRESETS.map((p, i) => (
@@ -90,7 +90,7 @@ export default function Reports({ onAuthError }: { onAuthError: () => void }) {
             <div><dd>{k.units}</dd><dt>sản phẩm<small>{k.skus} mã SKU khác nhau</small></dt></div>
             <div><dd>{vndParts(k.revenue)[0]}<i>{vndParts(k.revenue)[1]}</i></dd><dt>doanh thu ghi nhận<small>chưa gồm dòng thiếu giá</small></dt></div>
             <div className={k.missing_price ? "alert" : ""}><dd>{k.missing_price}</dd><dt>dòng thiếu giá<small>để trống trong file, SA/BA bổ sung trên app</small></dt></div>
-            <div><dd>{data.line_count}</dd><dt>dòng chi tiết<small>trong sheet "Chi tiết"</small></dt></div>
+            <div><dd>{data.line_count}</dd><dt>dòng chi tiết<small>sheet "Chi tiết" (mỗi dòng = 1 sản phẩm)</small></dt></div>
           </dl>
 
           {data.line_count === 0 ? (

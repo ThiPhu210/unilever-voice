@@ -43,6 +43,28 @@ def _status(it: dict, o: dict) -> str:
     return "Chờ SA xác nhận" if (o["needs_review"] or it.get("need_confirm")) else "Tự động"
 
 
+def _lookups() -> tuple[dict, dict, dict]:
+    """(nhân viên theo mã BA, mã cửa hàng theo tên, tên cửa hàng theo mã). Mã BA trùng: ưu tiên người chưa nghỉ, mới cập nhật nhất."""
+    staff: dict[str, dict] = {}
+    for r in db.query("SELECT ba_code, name, store_code FROM staff WHERE ba_code IS NOT NULL AND ba_code<>'' "
+                      "ORDER BY CASE WHEN left_at IS NULL THEN 0 ELSE 1 END, updated_at DESC"):
+        staff.setdefault(r["ba_code"].strip().lower(), r)
+    by_name: dict[str, list[str]] = {}
+    names: dict[str, str] = {}
+    for r in db.query("SELECT ess_store_code, name FROM stores ORDER BY ess_store_code"):
+        names[r["ess_store_code"]] = r["name"] or ""
+        by_name.setdefault((r["name"] or "").strip().lower(), []).append(r["ess_store_code"])
+    return staff, by_name, names
+
+
+def _store_code(store_name: str, staff_code: str, by_name: dict) -> str:
+    """Mã cửa hàng: ưu tiên khớp theo tên cửa hàng ghi trong cuộc tư vấn (BA có thể đổi điểm bán); tên trùng nhiều mã thì chọn mã của BA; không khớp thì dùng mã trong headcount."""
+    codes = by_name.get((store_name or "").strip().lower(), [])
+    if not codes or staff_code in codes:
+        return staff_code
+    return codes[0]
+
+
 def build(p: Principal, frm: str | None, to: str | None, sa_id: str | None, include_declined: bool) -> dict:
     d1, d2, start, end = _range(frm, to)
     if p.kind == "ba":
@@ -57,9 +79,14 @@ def build(p: Principal, frm: str | None, to: str | None, sa_id: str | None, incl
         "o.created_at, s.sa_id, s.sa_name, s.store FROM orders o JOIN sessions s ON s.id=o.session_id "
         f"WHERE {' AND '.join(where)} ORDER BY o.created_at, o.id", args)
     barcode = {r["sku_id"]: r["barcode"] or "" for r in db.query("SELECT sku_id, barcode FROM skus")}
+    staff, by_name, store_names = _lookups()
     lines, by_sa, by_sku = [], {}, {}
     for o in rows:
         local = datetime.strptime(o["created_at"], _FMT) + timedelta(hours=TZ_HOURS)
+        st = staff.get((o["sa_id"] or "").strip().lower(), {})
+        store_code = _store_code(o["store"], st.get("store_code") or "", by_name)
+        store_name = o["store"] or store_names.get(store_code, "")
+        sa_name = o["sa_name"] or st.get("name") or ""
         sa = by_sa.setdefault((o["sa_id"] or "").lower(), {
             "sa_id": o["sa_id"], "sa_name": o["sa_name"], "sessions": set(), "orders": 0, "units": 0,
             "revenue": 0, "missing_price": 0, "skus": set()})
@@ -68,8 +95,8 @@ def build(p: Principal, frm: str | None, to: str | None, sa_id: str | None, incl
             price = it.get("price")
             amount = it["qty"] * price if price is not None else None
             lines.append({
-                "date": local.date().isoformat(), "time": local.strftime("%H:%M"), "sa_id": o["sa_id"], "sa_name": o["sa_name"],
-                "store": o["store"] or "", "session_id": o["session_id"], "order_id": o["order_id"],
+                "timestamp": local, "date": local.date().isoformat(), "time": local.strftime("%H:%M:%S"), "sa_id": o["sa_id"], "sa_name": sa_name,
+                "store_code": store_code, "store": store_name, "session_id": o["session_id"], "order_id": o["order_id"],
                 "reply": REPLY.get(o["customer_confirm"], o["customer_confirm"] or ""), "barcode": barcode.get(it["sku_id"], ""),
                 "sku_id": it["sku_id"], "sku_name": it["sku_name"], "qty": it["qty"], "price": price, "amount": amount,
                 "status": _status(it, o)})
@@ -103,7 +130,7 @@ def _xl():
     return Workbook, Alignment, Font, PatternFill, get_column_letter
 
 
-def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] = frozenset(), text: set[int] = frozenset(), widths: list[int] | None = None):
+def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] = frozenset(), text: set[int] = frozenset(), dates: set[int] = frozenset(), widths: list[int] | None = None):
     _, Alignment, Font, PatternFill, get_column_letter = _xl()
     head, fill = Font(bold=True, color="3A2316"), PatternFill("solid", fgColor="FFF1DD")
     for j, h in enumerate(headers, 1):
@@ -116,6 +143,8 @@ def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] =
                 c.data_type = "s"   # chuỗi nào cũng là CHỮ: tên cửa hàng / SA bắt đầu bằng "=" không bị Excel hiểu là công thức
             if j in money:
                 c.number_format = "#,##0"
+            if j in dates:
+                c.number_format = "dd/mm/yyyy hh:mm:ss"   # timestamp thật (Excel sắp xếp / lọc theo giờ được), giờ Việt Nam
             if j in text:
                 c.number_format = "@"   # barcode giữ nguyên dạng chữ, không thành số khoa học 8.93E+12
     for j, w in enumerate(widths or [], 1):
@@ -128,8 +157,14 @@ def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] =
 def to_xlsx(rep: dict) -> bytes:
     Workbook, _, Font, _, _ = _xl()
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Tổng hợp theo SA"
+    ws3 = wb.active
+    ws3.title = "Chi tiết"
+    _table(ws3, 1, ["Timestamp", "Mã cửa hàng (Store code)", "Tên cửa hàng", "Tên nhân viên", "Mã nhân viên (BA code)", "Mã đơn hàng",
+                    "Mã cuộc tư vấn", "Barcode", "Mã SKU", "Sản phẩm", "Số lượng", "Đơn giá (đ)", "Thành tiền (đ)", "Phản hồi của khách", "Tình trạng"],
+           [[l["timestamp"], l["store_code"], l["store"], l["sa_name"], l["sa_id"], l["order_id"], l["session_id"], l["barcode"], l["sku_id"],
+             l["sku_name"], l["qty"], l["price"], l["amount"], l["reply"], l["status"]] for l in rep["lines"]],
+           money={12, 13}, text={2, 8}, dates={1}, widths=[20, 16, 28, 22, 16, 12, 15, 17, 34, 58, 10, 13, 15, 20, 20])
+    ws = wb.create_sheet("Tổng hợp theo SA")
     d1, d2 = date.fromisoformat(rep["from"]), date.fromisoformat(rep["to"])
     ws["A1"] = "Báo cáo bán hàng SA/BA"; ws["A1"].font = Font(bold=True, size=14, color="3A2316")
     ws["A2"] = f"Từ {d1:%d/%m/%Y} đến {d2:%d/%m/%Y} (giờ Việt Nam)"
@@ -149,12 +184,6 @@ def to_xlsx(rep: dict) -> bytes:
     _table(ws2, 1, ["Barcode", "Mã SKU", "Tên SKU", "Số lượng", "Số đơn", "Giá TB (đ)", "Doanh thu (đ)", "Số SA/BA bán"],
            [[s["barcode"], s["sku_id"], s["name"], s["qty"], s["orders"], s["avg_price"], s["revenue"], s["sas"]] for s in rep["by_sku"]],
            money={6, 7}, text={1}, widths=[17, 34, 58, 11, 10, 14, 16, 14])
-    ws3 = wb.create_sheet("Chi tiết")
-    _table(ws3, 1, ["Ngày", "Giờ", "Mã SA/BA", "Tên SA/BA", "Cửa hàng", "Mã cuộc", "Đơn #", "Phản hồi của khách", "Barcode", "Mã SKU",
-                    "Tên SKU", "Số lượng", "Đơn giá (đ)", "Thành tiền (đ)", "Tình trạng"],
-           [[l["date"], l["time"], l["sa_id"], l["sa_name"], l["store"], l["session_id"], l["order_id"], l["reply"], l["barcode"], l["sku_id"],
-             l["sku_name"], l["qty"], l["price"], l["amount"], l["status"]] for l in rep["lines"]],
-           money={13, 14}, text={9}, widths=[12, 7, 12, 22, 26, 15, 8, 20, 17, 34, 58, 10, 13, 15, 20])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -183,6 +212,6 @@ def sales_xlsx(frm: str | None = Query(None, alias="from"), to: str | None = Non
                p: Principal = Depends(principal)):
     rep = build(p, frm, to, sa_id, include_declined)
     who = re.sub(r"[^A-Za-z0-9_-]", "", rep["sa_id"])
-    name = f"bao-cao-ban-hang_{rep['from']}_{rep['to']}{'_' + who if who else ''}.xlsx"
+    name = f"report_{rep['from']}_{rep['to']}{'_' + who if who else ''}.xlsx"
     return Response(to_xlsx(rep), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
