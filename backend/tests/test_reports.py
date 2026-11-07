@@ -8,7 +8,6 @@ import tempfile
 
 os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(), "t.db"))
 os.environ.setdefault("AUDIO_DIR", tempfile.mkdtemp())
-import openpyxl
 import pytest
 from fastapi.testclient import TestClient
 
@@ -107,6 +106,7 @@ def test_ngay_khong_hop_le():
 
 
 def test_file_excel():
+    openpyxl = pytest.importorskip("openpyxl")   # CI không cài openpyxl thì bỏ qua đúng test này; nên thêm openpyxl vào bước cài của CI
     r = c.get("/api/reports/sales.xlsx", params={**RANGE, "sa_id": "RPT01"})
     assert r.status_code == 200 and "spreadsheetml" in r.headers["content-type"]
     assert r.headers["content-disposition"] == 'attachment; filename="bao-cao-ban-hang_2026-03-10_2026-03-11_RPT01.xlsx"'
@@ -135,10 +135,16 @@ def test_phan_quyen(monkeypatch):
     h = {"Authorization": f"Bearer {_token()}"}
     r = c.get("/api/reports/sales", params={**RANGE, "sa_id": "RPT02", "include_declined": "true"}, headers=h).json()
     assert [a["sa_id"] for a in r["by_sa"]] == ["RPT01"]                           # BA xin sa_id người khác: vẫn chỉ thấy của mình
-    x = c.get("/api/reports/sales.xlsx", params={**RANGE, "sa_id": "RPT02"}, headers=h)
-    assert x.status_code == 200 and "RPT01" in x.headers["content-disposition"]
     assert c.get("/api/reports/sas", headers=h).status_code == 403                 # danh sách mọi SA: chỉ admin
     assert {"RPT01", "RPT02"} <= {s["sa_id"] for s in c.get("/api/reports/sas").json()}
     monkeypatch.setenv("API_KEY", "secret")
     assert c.get("/api/reports/sales", params=RANGE).status_code == 401
-    assert c.get("/api/reports/sales.xlsx", params=RANGE, headers={"x-api-key": "secret"}).status_code == 200
+    assert c.get("/api/reports/sales", params=RANGE, headers={"x-api-key": "secret"}).status_code == 200
+    assert c.get("/api/reports/sales.xlsx", params=RANGE).status_code == 401      # chưa tới bước tạo file: bị chặn trước
+
+
+def test_phan_quyen_file_excel():
+    pytest.importorskip("openpyxl")
+    h = {"Authorization": f"Bearer {_token()}"}
+    x = c.get("/api/reports/sales.xlsx", params={**RANGE, "sa_id": "RPT02"}, headers=h)    # BA xin file của SA khác
+    assert x.status_code == 200 and "RPT01" in x.headers["content-disposition"] and "RPT02" not in x.headers["content-disposition"]

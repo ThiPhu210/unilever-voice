@@ -11,9 +11,6 @@ from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 
 from . import db
 from .auth import Principal, admin_only, principal
@@ -98,14 +95,20 @@ def build(p: Principal, frm: str | None, to: str | None, sa_id: str | None, incl
 
 
 # ---------- Excel ----------
-_HEAD = Font(bold=True, color="3A2316")
-_FILL = PatternFill("solid", fgColor="FFF1DD")
+def _xl():
+    """openpyxl chỉ nạp khi thật sự xuất file: API (xem trước, đăng nhập, ...) khởi động được cả khi môi trường không cài openpyxl."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    return Workbook, Alignment, Font, PatternFill, get_column_letter
 
 
 def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] = frozenset(), text: set[int] = frozenset(), widths: list[int] | None = None):
+    _, Alignment, Font, PatternFill, get_column_letter = _xl()
+    head, fill = Font(bold=True, color="3A2316"), PatternFill("solid", fgColor="FFF1DD")
     for j, h in enumerate(headers, 1):
         c = ws.cell(row=row, column=j, value=h)
-        c.font, c.fill, c.alignment = _HEAD, _FILL, Alignment(wrap_text=True, vertical="center")
+        c.font, c.fill, c.alignment = head, fill, Alignment(wrap_text=True, vertical="center")
     for i, vals in enumerate(data, row + 1):
         for j, v in enumerate(vals, 1):
             c = ws.cell(row=i, column=j, value=v)
@@ -123,6 +126,7 @@ def _table(ws, row: int, headers: list[str], data: list[list], money: set[int] =
 
 
 def to_xlsx(rep: dict) -> bytes:
+    Workbook, _, Font, _, _ = _xl()
     wb = Workbook()
     ws = wb.active
     ws.title = "Tổng hợp theo SA"
