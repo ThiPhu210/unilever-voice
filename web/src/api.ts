@@ -5,14 +5,36 @@ export const clearKey = () => localStorage.removeItem(KEY);
 
 export class Unauthorized extends Error {}
 
+/** Lỗi từ server: ưu tiên chữ trong `detail` (vd "Ngày kết thúc phải sau hoặc bằng ngày bắt đầu"), không có thì "400 Bad Request". */
+async function errText(res: Response): Promise<string> {
+  try {
+    const j = await res.json();
+    if (typeof j?.detail === "string") return j.detail;
+  } catch { /* không phải JSON */ }
+  return `${res.status} ${res.statusText}`;
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...init,
     headers: { ...(init.headers || {}), "x-api-key": getKey() },
   });
   if (res.status === 401) throw new Unauthorized("401");
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) throw new Error(await errText(res));
   return res.json();
+}
+
+/** Tải file (có gửi API key trong header, nên không dùng được thẻ <a href> trực tiếp). Tên file lấy từ server. */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(path, { headers: { "x-api-key": getKey() } });
+  if (res.status === 401) throw new Unauthorized("401");
+  if (!res.ok) throw new Error(await errText(res));
+  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") || "")?.[1] || fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 export const audioUrl = (id: string) => `/api/sessions/${id}/audio?key=${encodeURIComponent(getKey())}`;
@@ -52,6 +74,13 @@ export type SkuStat = {
   last_sold: string; by_day: { date: string; qty: number; revenue: number }[];
 };
 export type SkuStats = { days: number; dates: string[]; skus: SkuStat[] };
+export type ReportSa = { sa_id: string; sa_name: string; sessions: number; orders: number; units: number; skus: number; revenue: number; missing_price: number };
+export type ReportSku = { sku_id: string; name: string; barcode: string; qty: number; orders: number; revenue: number; avg_price: number | null; sas: number };
+export type SalesReport = {
+  from: string; to: string; sa_id: string; include_declined: boolean; line_count: number;
+  kpi: { sessions: number; orders: number; units: number; revenue: number; skus: number; missing_price: number };
+  by_sa: ReportSa[]; by_sku: ReportSku[];
+};
 
 // created_at từ server là UTC "YYYY-MM-DD HH:MM:SS"
 export const fmtTime = (ts: string) =>

@@ -18,20 +18,26 @@ class Catalog:
             os.path.join(os.path.dirname(__file__), "..", "..", "data", "sku_catalog.csv"),
         )
         self.skus: dict[str, dict] = {}
+        barcodes: dict[str, str] = {}
         self.rows: list[dict] = []
         self.index: list[tuple[str, str, str | None]] = []  # (sku_id, alias_words, alias_size)
         with open(path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                # CSV chỉ cần 2 cột: name, aliases. sku_id (nếu có) được giữ; không có thì sinh từ tên.
+                # CSV chỉ cần 2 cột: name, aliases. sku_id (nếu có) được giữ; không có thì sinh từ tên. Cột barcode là tuỳ chọn.
                 row["name"] = row["name"].strip()
                 row["sku_id"] = (row.get("sku_id") or "").strip() or make_sku_id(row["name"])
                 row["unit"] = row.get("unit") or ""
                 row["aliases"] = row.get("aliases") or ""
+                row["barcode"] = (row.get("barcode") or "").strip()
                 if row["sku_id"] in self.skus:
                     raise ValueError(f"Trùng SKU trong catalog: {row['name']}")
+                if row["barcode"]:
+                    if row["barcode"] in barcodes:
+                        raise ValueError(f"Trùng barcode {row['barcode']}: {barcodes[row['barcode']]} / {row['name']}")
+                    barcodes[row["barcode"]] = row["name"]
                 self.rows.append(row)
                 self.skus[row["sku_id"]] = {
-                    "sku_id": row["sku_id"], "name": row["name"], "unit": row["unit"],
+                    "sku_id": row["sku_id"], "name": row["name"], "unit": row["unit"], "barcode": row["barcode"],
                 }
                 aliases = [a for a in row["aliases"].split("|") if a.strip()] + [row["name"]]
                 for a in aliases:

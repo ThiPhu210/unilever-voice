@@ -59,7 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_sa ON sessions(sa_id);
 -- Danh mục SKU (đồng bộ từ data/sku_catalog.csv mỗi lần API khởi động)
 CREATE TABLE IF NOT EXISTS skus(
     sku_id TEXT PRIMARY KEY, name TEXT NOT NULL, unit TEXT, brand TEXT, aliases TEXT,
-    active INTEGER DEFAULT 1);
+    active INTEGER DEFAULT 1, barcode TEXT);
 
 -- Dữ liệu tổ chức (nạp từ file headcount bằng scripts/import_headcount.py). KHÔNG chứa CCCD/ngày sinh/SĐT/email cá nhân/lương.
 CREATE TABLE IF NOT EXISTS supervisors(
@@ -96,9 +96,15 @@ def init():
         with _pg_pool().connection() as c:
             for stmt in filter(str.strip, script.split(";")):
                 c.execute(stmt)
+            # DB đã có từ trước (bảng skus chưa có cột barcode): thêm cột, rồi mới tạo index
+            c.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS barcode TEXT")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_skus_barcode ON skus(barcode)")
     else:
         with _sqlite() as c:
             c.executescript(script)
+            if "barcode" not in [r[1] for r in c.execute("PRAGMA table_info(skus)")]:
+                c.execute("ALTER TABLE skus ADD COLUMN barcode TEXT")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_skus_barcode ON skus(barcode)")
 
 
 def execute(sql, args=()):
@@ -138,8 +144,8 @@ def sync_skus(catalog_skus: dict, rows: list[dict] | None = None):
     for r in rows or []:
         brand = r["name"].split()[0]
         execute(
-            "INSERT INTO skus(sku_id,name,unit,brand,aliases) VALUES(?,?,?,?,?) "
+            "INSERT INTO skus(sku_id,name,unit,brand,aliases,barcode) VALUES(?,?,?,?,?,?) "
             "ON CONFLICT(sku_id) DO UPDATE SET name=excluded.name, unit=excluded.unit, "
-            "brand=excluded.brand, aliases=excluded.aliases",
-            (r["sku_id"], r["name"], r["unit"], brand, r["aliases"]),
+            "brand=excluded.brand, aliases=excluded.aliases, barcode=excluded.barcode",
+            (r["sku_id"], r["name"], r["unit"], brand, r["aliases"], r.get("barcode") or None),
         )

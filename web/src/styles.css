@@ -157,3 +157,10 @@ select { padding-right:34px; }
 .facts dd i { white-space:nowrap; }
 .facts dd { white-space:nowrap; }
 .order thead th.q { width:auto; font:500 12.5px var(--body); }
+
+/* ---------- báo cáo ---------- */
+.report-filters { margin-bottom:40px; }
+.report-filters .btn { margin-top:0; padding:0 24px; height:44px; }
+.report-filters input[type=date] { min-width:160px; }
+.tbl td.code { font-variant-numeric:tabular-nums; letter-spacing:.02em; white-space:nowrap; }
+@media (max-width:860px) { .report-filters .btn { width:100%; } .report-filters input[type=date] { width:100%; } }

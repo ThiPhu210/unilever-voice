@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from . import db, speaker, stats
 from .auth import Principal, admin_only, owns, principal, router as auth_router
+from .reports import router as reports_router
 from .coaching import analyze
 from .parser import Catalog, parse_transcript
 
@@ -24,6 +25,7 @@ _asr_lock = threading.Semaphore(1)  # chỉ chạy 1 phiên ASR một lúc để
 
 app = FastAPI(title="Unilever Voice Coach", dependencies=[Depends(principal)])
 app.include_router(auth_router)
+app.include_router(reports_router)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
