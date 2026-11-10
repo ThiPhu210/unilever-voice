@@ -14,6 +14,15 @@ def make_sku_id(name: str) -> str:
     return re.sub(r"[^a-z0-9.]+", "-", strip_accents(name.lower())).strip("-")
 
 
+def _size_near(a: str, b: str) -> bool:
+    """Cùng đơn vị, cùng các chữ số có nghĩa, chỉ lệch bậc 10: 500ml ~ 50ml, 3.9kg ~ 39kg."""
+    ma, mb = SIZE_RE.match(a), SIZE_RE.match(b)
+    if not (ma and mb) or ma.group(2) != mb.group(2):
+        return False
+    sig = lambda x: x.replace(".", "").replace(",", "").strip("0")
+    return sig(ma.group(1)) == sig(mb.group(1))
+
+
 class Catalog:
     def __init__(self, path: str | None = None):
         path = path or os.getenv(
@@ -71,6 +80,7 @@ class Catalog:
         compact = ordered.replace(" ", "")
 
         best: dict[str, float] = {}
+        near: set[str] = set()   # SKU đang được chấm điểm với dung tích chỉ 'gần đúng' (lệch bậc 10)
         for sku_id, a_words, a_size in self.index:
             a_sorted = " ".join(sorted(a_words.split()))
             s = 0.6 * fuzz.token_set_ratio(sorted_, a_sorted) + 0.4 * fuzz.token_sort_ratio(sorted_, a_sorted)
@@ -79,8 +89,12 @@ class Catalog:
                 if a_size is None:
                     s *= 0.9
                 elif a_size not in sizes:
-                    s *= 0.6
-            best[sku_id] = max(best.get(sku_id, 0.0), s)
+                    # ASR hay đọc lệch đúng một bậc 10 ("năm trăm" thay "năm mươi": 500ml/50ml) -> phạt nhẹ, vẫn bị đánh dấu cần xác nhận
+                    is_near = any(_size_near(a_size, z) for z in sizes)
+                    s *= 0.85 if is_near else 0.6
+            if s > best.get(sku_id, -1.0):
+                best[sku_id] = s
+                (near.add if sizes and a_size is not None and a_size not in sizes and is_near else near.discard)(sku_id)
 
         ranked = sorted(best.items(), key=lambda x: -x[1])
         top, top_s = ranked[0]
@@ -88,6 +102,8 @@ class Catalog:
         conf = top_s / 100.0
         if top_s - second_s < 4:  # hai SKU quá sát nhau => mơ hồ
             conf = min(conf, 0.6)
+        if top in near:           # dung tích nghe lệch bậc 10 (500ml/50ml): luôn để người xác nhận
+            conf = min(conf, 0.8)
         return {
             "sku_id": top,
             "sku_name": self.skus[top]["name"],

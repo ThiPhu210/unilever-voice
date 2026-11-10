@@ -187,6 +187,9 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             p = parse_number(toks, i)
             if p:
                 v, j = p
+                if name and price is None and j + 1 < n and toks[j] == "trong" and parse_number(toks, j + 1):
+                    v2, j2 = parse_number(toks, j + 1)   # "rửa chén mười bốn trong một": số đọc bằng chữ nằm trong TÊN SKU
+                    name.extend([str(v), "trong", str(v2)]); i = j2; continue
                 if j < n and toks[j] in SIZE_UNIT_MAP:  # "tam tram gam" = 800g
                     name.append(size_norm(str(v), toks[j])); i = j + 1; continue
                 if name or qty is not None:

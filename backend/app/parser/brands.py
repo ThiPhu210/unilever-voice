@@ -41,6 +41,7 @@ BRAND_VI: dict[str, list[str]] = {
     "cif": ["síp", "cíp"],
     "ponds": ["pon"],
     "knorr": ["cờ nor", "ca nô"],                   # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại
+    "simple": ["sim bồ"],
     "walls": ["oan"],                               # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại ("quan"/"goa" đã được fold gộp về "oan")
 }
 
@@ -73,20 +74,32 @@ def _build_alias_rules():
 _ALIAS_RULES = _build_alias_rules()
 
 
+# Từ vựng sản phẩm (không phải brand) hay gặp trong tên SKU và hay bị ASR viết theo âm. Chỉ dùng để nhân alias, không vào prompt ASR.
+TERM_VI: dict[str, list[str]] = {
+    r"ceramides?": ["sê ra mai", "xê ra mít"],
+    "pro": ["bồ", "pờ rô"],
+    "serum": ["se rum", "xê rum"],
+    "derma": ["đơ ma", "đe ma"],
+}
+_TERM_RULES = [(re.compile(_NB + k + _NE), [p for p in dict.fromkeys(map(_plain, v))]) for k, v in TERM_VI.items()]
+
+
 def brand_variants(alias: str) -> list[str]:
-    """Alias SKU (đã normalize, không dấu) có tên brand Latin -> các bản thay brand bằng từng cách đọc tiếng Việt."""
-    out = []
-    for rx, vs in _ALIAS_RULES:
-        if rx.search(alias):
-            out += [rx.sub(v, alias, count=1) for v in vs]
-    return out
+    """Alias SKU (đã normalize, không dấu) có tên brand / từ vựng Latin -> các bản thay bằng cách đọc tiếng Việt.
+    Các từ được thay ĐỘC LẬP rồi nhân tổ hợp ("simple ... pro ceramides" -> "sim bo ... bo se ra mai"), tối đa 40 bản."""
+    rules = [(rx, vs) for rx, vs in _ALIAS_RULES + _TERM_RULES if rx.search(alias) and vs]
+    out = [alias]
+    for rx, vs in rules:
+        out = out + [rx.sub(v, a, count=1) for a in out for v in vs]
+        out = out[:40]
+    return out[1:]
 
 
 # Đơn vị đọc thành chữ -> đơn vị chuẩn. Chạy trên chữ đã bỏ dấu.
 _UNIT_FIX = [
     (re.compile(_NB + r"ki\s*lo\s*gr?am" + _NE), "kg"),
     (re.compile(_NB + r"ki\s*lo" + _NE), "kg"),
-    (re.compile(_NB + r"(?:mi\s*li\s*lit|mi\s*li|mi\s*lit|miu|mil)" + _NE), "ml"),   # "mi li lít" / "mi li" / "miu"
+    (re.compile(_NB + r"(?:mi\s*li\s*lit|mi\s*li|mi\s*lit|mie?u|mil)" + _NE), "ml"),   # "mi li lít" / "mi li" / "miu" / "miêu"
     (re.compile(_NB + r"go\s*ram" + _NE), "gam"),
 ]
 _DIG = {"khong": "0", "mot": "1", "hai": "2", "ba": "3", "bon": "4", "nam": "5", "lam": "5",
@@ -94,6 +107,17 @@ _DIG = {"khong": "0", "mot": "1", "hai": "2", "ba": "3", "bon": "4", "nam": "5",
 _NUM = r"(\d+|" + "|".join(_DIG) + r")"
 # "ba phẩy tám ki lô gam" -> "3.8kg" (số thập phân đọc bằng chữ; dung tích đã nối liền như parser mong đợi)
 _DEC = re.compile(_NB + _NUM + r"\s+(?:phay|cham)\s+" + _NUM + r"\s*(kg|ky|ki|g|gr|gam|gram|ml|l|lit|lt)" + _NE)
+
+
+# "ba ký chín" = 3.9kg ("ký" đóng vai dấu phẩy; ASR còn viết "chín" thành "chính"). Chỉ nhận khi số sau KẾT THÚC cụm (hết câu / "giá"),
+# để "một ký chín mươi nghìn" hay "một ký, 2 omo" không bị nối nhầm.
+_DIG2 = {**_DIG, "chinh": "9", "rua": "5"}
+_NUM2 = r"(\d|" + "|".join(k for k in _DIG2 if k != "rua") + r")"
+_KY_DEC = re.compile(_NB + _NUM + r"\s+(?:ky|kg|ki\s*lo|ki)\s+" + _NUM2 + r"(?=\s*(?:gia\b|da\b|[,;.?!]|$))")
+
+
+def _ky_sub(m: re.Match) -> str:
+    return f"{_DIG.get(m.group(1), m.group(1))}.{_DIG2.get(m.group(2), m.group(2))}kg"
 
 
 def _dec_sub(m: re.Match) -> str:
@@ -104,7 +128,8 @@ def canon_units(t: str) -> str:
     """t: chữ thường, đã bỏ dấu. 'ki lô gam' -> 'kg'; 'mi li lít' -> 'ml'; 'ba phẩy tám ki' -> '3.8kg'."""
     for rx, rep in _UNIT_FIX:
         t = rx.sub(rep, t)
-    return _DEC.sub(_dec_sub, t)
+    t = _DEC.sub(_dec_sub, t)
+    return _KY_DEC.sub(_ky_sub, t)
 
 
 # ---------- Sinh "script" tiếng Việt cho ASR ----------

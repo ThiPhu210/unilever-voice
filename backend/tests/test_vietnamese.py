@@ -250,3 +250,34 @@ def test_ml_doc_nhieu_kieu(spoken):
 def test_bon_tram_la_so_con_bon_kem_la_brand():
     items, _ = one("Dạ mình chốt hai sữa tắm lúa galaxy bốn trăm bảy mươi gam giá bảy bảy ngàn. Ok em.")
     assert items[0][0].startswith("lux-") and items[0][1:] == (2, 77000)
+
+
+REAL_2 = ("một ô môn nước giặt cửa trên ba ký chính giá chín lăm ngàn một nước súc miệng bê ép ăc tiêu đi phen năm trăm miêu giá bảy mươi ba ngàn "
+          "một kem đánh răng cờ lô súp thơ mát lộc đề một trăm bốn mươi gam giá ba chín ngàn một kem dưỡng phục hồi sim bồ bồ sê ra mai năm trăm miêu "
+          "giá một trăm bốn mươi ngàn hai sen lai viên rửa chén mười bốn trong một giá bốn hai ngàn.")
+
+
+def test_transcript_that_so_2():
+    items = [i for o in parse_transcript(REAL_2, CAT)["orders"] for i in o["items"]]
+    assert [(i["sku_name"].split()[0], i["qty"], i["price"]) for i in items] == [
+        ("OMO", 1, 95000), ("NSM", 1, 73000), ("KĐR", 1, 39000), ("SIMPLE", 1, 140000), ("SUNLIGHT", 2, 42000)]
+    assert items[0]["sku_name"].endswith("3.9kg")
+    assert items[3]["need_confirm"]            # "năm trăm miêu" nhưng SKU là 50ml: lệch bậc 10 -> phải để người xác nhận
+    assert not items[0]["need_confirm"]
+
+
+@pytest.mark.parametrize("spoken,out", [
+    ("ba ký chín", "3.9kg"), ("ba ký chính", "3.9kg"), ("ba ki lô chín", "3.9kg"), ("hai ký rưỡi chai", None),
+    ("một ký chín mươi nghìn", None), ("ba ký chín giá", "3.9kg gia"), ("năm trăm miêu", "nam tram ml"), ("năm trăm miu", "nam tram ml"),
+])
+def test_ky_la_dau_phay_va_mieu(spoken, out):
+    got = normalize(spoken)
+    if out is None:
+        assert "3.9" not in got and "9kg" not in got
+    else:
+        assert got == out
+
+
+def test_so_chu_nam_trong_ten_sku():
+    items, _ = one("hai sen lai viên rửa chén mười bốn trong một giá bốn hai ngàn. Ok.")
+    assert items[0][0].startswith("sunlight-vien-rua-chen") and items[0][1:] == (2, 42000)
