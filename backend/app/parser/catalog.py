@@ -14,13 +14,20 @@ def make_sku_id(name: str) -> str:
     return re.sub(r"[^a-z0-9.]+", "-", strip_accents(name.lower())).strip("-")
 
 
-def _size_near(a: str, b: str) -> bool:
-    """Cùng đơn vị, cùng các chữ số có nghĩa, chỉ lệch bậc 10: 500ml ~ 50ml, 3.9kg ~ 39kg."""
+_UNIT_GROUP = {"g": "mass", "ml": "mass", "kg": "kilo", "l": "kilo"}   # g ~ ml, kg ~ l (nước giặt/dầu gội ghi ml hay g tuỳ nhãn)
+
+
+def _size_rel(a: str, b: str) -> str | None:
+    """Quan hệ giữa dung tích nghe được `b` và dung tích alias `a` khi KHÔNG bằng nhau:
+    'unit' = cùng con số, khác g/ml (610ml ~ 610g); 'mag' = cùng chữ số có nghĩa, lệch bậc 10 (500ml ~ 50ml); None = khác hẳn."""
     ma, mb = SIZE_RE.match(a), SIZE_RE.match(b)
-    if not (ma and mb) or ma.group(2) != mb.group(2):
-        return False
+    if not (ma and mb) or _UNIT_GROUP.get(ma.group(2)) != _UNIT_GROUP.get(mb.group(2)):
+        return None
+    f = lambda x: float(x.replace(",", "."))
+    if f(ma.group(1)) == f(mb.group(1)):
+        return "unit"
     sig = lambda x: x.replace(".", "").replace(",", "").strip("0")
-    return sig(ma.group(1)) == sig(mb.group(1))
+    return "mag" if sig(ma.group(1)) == sig(mb.group(1)) else None
 
 
 class Catalog:
@@ -80,7 +87,7 @@ class Catalog:
         compact = ordered.replace(" ", "")
 
         best: dict[str, float] = {}
-        near: set[str] = set()   # SKU đang được chấm điểm với dung tích chỉ 'gần đúng' (lệch bậc 10)
+        near: set[str] = set()   # SKU đang được chấm điểm với dung tích chỉ 'gần đúng' lệch bậc 10 (luôn cần xác nhận)
         for sku_id, a_words, a_size in self.index:
             a_sorted = " ".join(sorted(a_words.split()))
             s = 0.6 * fuzz.token_set_ratio(sorted_, a_sorted) + 0.4 * fuzz.token_sort_ratio(sorted_, a_sorted)
@@ -90,11 +97,12 @@ class Catalog:
                     s *= 0.9
                 elif a_size not in sizes:
                     # ASR hay đọc lệch đúng một bậc 10 ("năm trăm" thay "năm mươi": 500ml/50ml) -> phạt nhẹ, vẫn bị đánh dấu cần xác nhận
-                    is_near = any(_size_near(a_size, z) for z in sizes)
-                    s *= 0.85 if is_near else 0.6
+                    rels = {_size_rel(a_size, z) for z in sizes}
+                    rel = "unit" if "unit" in rels else "mag" if "mag" in rels else None
+                    s *= {"unit": 0.92, "mag": 0.85}.get(rel, 0.6)
             if s > best.get(sku_id, -1.0):
                 best[sku_id] = s
-                (near.add if sizes and a_size is not None and a_size not in sizes and is_near else near.discard)(sku_id)
+                (near.add if sizes and a_size is not None and a_size not in sizes and rel == "mag" else near.discard)(sku_id)
 
         ranked = sorted(best.items(), key=lambda x: -x[1])
         top, top_s = ranked[0]

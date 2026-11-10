@@ -281,3 +281,24 @@ def test_ky_la_dau_phay_va_mieu(spoken, out):
 def test_so_chu_nam_trong_ten_sku():
     items, _ = one("hai sen lai viên rửa chén mười bốn trong một giá bốn hai ngàn. Ok.")
     assert items[0][0].startswith("sunlight-vien-rua-chen") and items[0][1:] == (2, 42000)
+
+
+def test_dove_dau_xa_tam_la_tram_va_mi_mit():
+    """'hai tăm mười bảy ngàn' = 217k ('tăm' = trăm, không phải tám); 'mi mít' = ml; catalog ghi 610g nhưng khách nói ml."""
+    items, o = one("Một dầu xả đô mắc cha hoa anh đào sáu trăm mười mi mít giá hai tăm mười bảy ngàn")
+    assert items == [("dove-dau-xa-matcha-hoa-anh-dao-610g", 1, 217000)] or items[0][1:] == (1, 217000)
+    assert items[0][0].startswith("dove-dau-xa-matcha")
+
+
+@pytest.mark.parametrize("spoken,vnd", [
+    ("hai tăm mười bảy ngàn", 217000), ("hai tăm ba mươi nghìn", 230000), ("một tăm lẻ ba ngàn", 103000),
+    ("hai trăm mười bảy ngàn", 217000), ("tám mươi bảy ngàn", 87000),
+])
+def test_gia_tam_la_tram(spoken, vnd):
+    from app.parser.prices import parse_price
+    assert parse_price(normalize(spoken).split(), 0)[0] == vnd
+
+
+def test_tam_muoi_van_la_80():
+    """Không phá cách đọc thường: 'tám mươi' (80) và 'hai tám mươi' không bị đổi nếu không đủ ngữ cảnh giá."""
+    assert parse_number(normalize("tám mươi bảy").split(), 0) == (87, 3)

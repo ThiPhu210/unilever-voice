@@ -46,6 +46,20 @@ def _spoken_digits(toks: list[str], i: int) -> tuple[int, int] | None:
     return None
 
 
+def _tam_la_tram(toks: list[str], i: int) -> list[str]:
+    """ASR nghe "trăm" thành "tăm" (-> 'tam' = tám): "hai tăm mười bảy ngàn" = 217k, không phải "hai, tám mươi bảy".
+    Chỉ trong ngữ cảnh GIÁ: số đơn + "tam" + (mười/chục/lẻ/chữ số) và cả cụm kết thúc bằng nghìn/ngàn/triệu."""
+    n = len(toks)
+    end = next((k for k in range(i, min(n, i + 8)) if toks[k] in THOUSAND | MILLION), None)
+    if end is None:
+        return toks
+    out = list(toks)
+    for k in range(i + 1, end):
+        if toks[k] == "tam" and toks[k - 1] in DIGITS and toks[k + 1] in {"muoi", "chuc", "le", "linh", *DIGITS}:
+            out[k] = "tram"
+    return out
+
+
 def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, int] | None:
     """Thử đọc giá tại vị trí i. Trả về (vnd, vị_trí_kế_tiếp) hoặc None.
     kg_as_k=True: coi "92Kg" (số nguyên 1-3 chữ số + kg/ky/ki) là "92k" = 92.000đ."""
@@ -84,6 +98,8 @@ def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, in
         p = parse_number(toks, i)
         if p and p[1] < n and toks[p[1]] in THOUSAND | MILLION:
             v, j = p
+        elif (fixed := _tam_la_tram(toks, i)) is not toks and (p2 := parse_number(fixed, i)) and p2[1] < n and fixed[p2[1]] in THOUSAND | MILLION:
+            v, j = p2
         else:
             p = _spoken_digits(toks, i)
             if not p:
