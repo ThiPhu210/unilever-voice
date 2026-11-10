@@ -4,6 +4,7 @@ from app.parser import Catalog, parse_transcript
 from app.parser.normalize import normalize
 from app.parser.numbers import parse_number
 from app.parser.brands import num_to_vi, vi_text, asr_prompt, SCRIPT, BRAND_VI, _ALIAS_RULES
+from app.parser.phonetics import fold, surface_variants
 from app.parser.normalize import strip_accents
 from app.asr import _resolve_model
 
@@ -56,7 +57,6 @@ def _sku(prefix: str) -> str:
 ])
 def test_cach_doc_nguoi_dung_neu(reading, name):
     sku = next(s for s in CAT.skus.values() if s["name"].startswith(name))
-    assert any(reading == _plain_of(v) for vs in BRAND_VI.values() for v in vs), f"{reading!r} chưa có trong BRAND_VI"
     orders = parse_transcript(_spoken(sku["name"], reading), CAT)["orders"]
     assert [(i["sku_id"], i["qty"], i["price"]) for o in orders for i in o["items"]] == [(sku["sku_id"], 2, 50000)]
 
@@ -76,7 +76,10 @@ def test_moi_sku_x_moi_cach_doc_khop_nhu_viet_latin():
             exp = [(row["sku_id"], 2, 50000)]
             if _items(f"hai {n} giá năm mươi nghìn đồng. Dạ ok em.", CAT) != exp:
                 continue    # tên SKU có số/chữ gây nhầm sẵn (vd "Từ Thịt", "RE0216"): lỗi có từ trước, không thuộc brand
-            for v in variants:
+            # Mọi cách nói lệch vùng miền SINH TỰ ĐỘNG từ cách đọc gốc (không phải danh sách viết tay)
+            for v in dict.fromkeys(sv for base in variants for sv in surface_variants(_plain_of(base), limit=60)):
+                if v.split()[0] in _NUMBER_WORDS:
+                    continue    # "hai ba so lin" (Vaseline nói lệch v->b): "ba" là số 3 nên câu vốn mơ hồ, không phải lỗi khớp tên
                 tested += 1
                 got = _items(f"hai {rx.sub(v, n, count=1)} giá năm mươi nghìn đồng. Dạ ok em.", CAT)
                 if got != exp:
@@ -84,8 +87,42 @@ def test_moi_sku_x_moi_cach_doc_khop_nhu_viet_latin():
     assert tested > 250 and not bad, bad[:5]
 
 
+_NUMBER_WORDS = {"khong", "mot", "hai", "ba", "bon", "nam", "sau", "bay", "tam", "chin", "muoi", "lam", "tu"}
+
+
 def _items(text, cat):
     return [(i["sku_id"], i["qty"], i["price"]) for o in parse_transcript(text, cat)["orders"] for i in o["items"]]
+
+
+@pytest.mark.parametrize("a,b", [
+    ("xăn nai", "săn lai"), ("săn nai", "săn lai"), ("ha xo lin", "ha giô lin"), ("ha đô lin", "ha zo lin"),
+    ("bê ét", "pê ét"), ("bi ét", "pi ét"), ("tre se mê", "che xe mê"), ("re xô na", "đê sô na"), ("bim", "vim"),
+    ("com bo", "com phô"), ("xốp", "sốp"), ("bong", "pon"), ("quan", "oan"), ("lia", "lia"), ("lúc", "lút"),
+])
+def test_fold_gop_cac_cach_noi_vung_mien(a, b):
+    assert fold(a) == fold(b)
+
+
+@pytest.mark.parametrize("a,b", [("lai bôi", "săn lai"), ("sốp", "síp"), ("dầu gội", "dầu xả"), ("cờ lia", "clo súp")])
+def test_fold_khong_gop_nham_tu_khac_nhau(a, b):
+    assert fold(a) != fold(b)
+
+
+def test_nguoi_noi_giong_vung_mien_van_ra_dung_sku():
+    """Cách nói lệch CHƯA từng được ghi ở đâu (tự nghĩ ra theo quy luật vùng miền) vẫn ra đúng SKU."""
+    gia = "giá năm mươi nghìn đồng. Dạ ok em."
+    cases = [
+        (f"hai xăn xiu dầu gội mềm mượt diệu kỳ một trăm bảy mươi gam {gia}", SUNSILK),
+        (f"hai lăn lai nước rửa chén chanh chín phẩy năm ki lô gam {gia}", "sunlight-nuoc-rua-chen-chanh-9.5kg"),
+        (f"hai nai bôi sữa tắm than hoạt tính cám gạo hai trăm bảy mươi gam {gia}", LIFEBUOY),
+        (f"hai sữa tắm ha xô lình fragrance hương sữa gạo hoa nhài chín trăm gam {gia}", HAZELINE_900G),
+    ]
+    for text, sku in cases:
+        assert [i[0] for i in _items_flat(text)] == [sku], text
+
+
+def _items_flat(text):
+    return [(i["sku_id"], i["qty"], i["price"]) for o in parse_transcript(text, CAT)["orders"] for i in o["items"]]
 
 
 def test_brand_chua_co_trong_catalog(tmp_path):

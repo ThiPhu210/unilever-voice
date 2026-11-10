@@ -4,6 +4,7 @@ from rapidfuzz import fuzz
 from .normalize import strip_accents
 from .tokens import canon_tokens, SIZE_RE
 from .brands import vi_text, brand_variants
+from .phonetics import fold
 from .normalize import normalize
 import re
 
@@ -22,7 +23,8 @@ class Catalog:
         self.skus: dict[str, dict] = {}
         barcodes: dict[str, str] = {}
         self.rows: list[dict] = []
-        self.index: list[tuple[str, str, str | None]] = []  # (sku_id, alias_words, alias_size)
+        # (sku_id, alias_words, alias_size). alias_words là KHOÁ ÂM (phonetics.fold), không phải chữ gốc: "xăn nai" và "săn lai" cùng khoá.
+        self.index: list[tuple[str, str, str | None]] = []
         with open(path, encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 # CSV chỉ cần 2 cột: name, aliases. sku_id (nếu có) được giữ; không có thì sinh từ tên. Cột barcode là tuỳ chọn.
@@ -44,11 +46,12 @@ class Catalog:
                 aliases = [a for a in row["aliases"].split("|") if a.strip()] + [row["name"]]
                 seen: set[tuple[str, str | None]] = set()
                 for a in aliases:
-                    # Mỗi alias có tên brand Latin được nhân thêm bản theo cách đọc tiếng Việt/vùng miền ("clear" -> "co lia", "lia"...)
+                    # Mỗi alias có tên brand Latin được nhân thêm bản theo cách đọc gốc tiếng Việt ("clear" -> "co lia"); giọng vùng miền
+                    # không nhân thêm mà do fold() gộp lúc lập chỉ mục + lúc so khớp, nên nhiều bản trùng khoá và bị bỏ ở `seen`.
                     for text in [a, *brand_variants(normalize(a))]:
                         toks = canon_tokens(text)
                         size = next((t for t in toks if SIZE_RE.match(t)), None)
-                        words = " ".join(t for t in toks if not SIZE_RE.match(t))
+                        words = " ".join(fold([t for t in toks if not SIZE_RE.match(t)]))
                         if (words, size) not in seen:
                             seen.add((words, size))
                             self.index.append((row["sku_id"], words, size))
@@ -62,7 +65,7 @@ class Catalog:
         # khớp với alias là đủ (không phạt); chỉ phạt khi KHÔNG size nào khớp. Trước đây chỉ lấy size đầu tiên -> rác thắng.
         sizes = [w for w in words if SIZE_RE.match(w)]
         size = sizes[-1] if sizes else None   # size "chính" = size cuối (mẫu câu: số lượng, tên, dung tích)
-        plain = [w for w in words if not SIZE_RE.match(w)]
+        plain = fold([w for w in words if not SIZE_RE.match(w)])   # cùng khoá âm với chỉ mục: bất kể giọng vùng miền
         ordered = " ".join(plain)
         sorted_ = " ".join(sorted(plain))
         compact = ordered.replace(" ", "")

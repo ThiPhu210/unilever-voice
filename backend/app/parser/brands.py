@@ -1,41 +1,47 @@
-"""Brand Unilever đọc theo TIẾNG VIỆT (có cả giọng vùng miền) + dung tích/giá đọc bằng chữ.
+"""Brand Unilever đọc theo TIẾNG VIỆT + dung tích/giá đọc bằng chữ.
 
 Model tiếng Việt (PhoWhisper) viết theo âm: "Clear" -> "cờ lia", "Surf" -> "sốp", "9kg" -> "chín ki lô gam"; người Việt còn đọc lệch
-b/p, gi/d/r, x/s, l/n, tr/ch ("Surf" -> "xốp", "Hazeline" -> "ha xo lin", "Sunlight" -> "săn nai")...
-  1) BRAND_VI + brand_variants(): mỗi alias SKU có chứa tên brand chuẩn được nhân thêm một bản cho MỖI cách đọc (Catalog dùng).
+theo vùng miền (b/p, gi/d/r, x/s, l/n, tr/ch, -t/-c, -n/-ng...: "Surf" -> "xốp", "Hazeline" -> "ha xo lin", "Sunlight" -> "săn nai").
+  1) BRAND_VI chỉ giữ cách đọc GỐC của brand (phiên âm từ tiếng Anh: "clear" -> "cờ lia" / "clia"). KHÔNG liệt kê giọng vùng miền:
+     phần đó do phonetics.fold() lo, cả alias SKU lẫn transcript đều được gấp về cùng khoá âm lúc so khớp (xem Catalog.match),
+     nên "xăn nai", "săn lai", "xăn lai"... tự khớp mà không cần ghi từng cái. Brand mới chỉ cần thêm 1-2 cách đọc gốc.
+     Brand_variants(): mỗi alias SKU có tên brand Latin được nhân thêm một bản cho MỖI cách đọc gốc (Catalog dùng).
      Cố ý KHÔNG thay chữ trong transcript: nhiều cách đọc trùng từ thường khi bỏ dấu ("do", "bon" = bốn, "lac" = lạc, "ac" = ác),
      thay toàn văn sẽ làm hỏng câu nói bình thường. Làm ở alias thì chỉ ảnh hưởng đoạn có {số lượng} {sản phẩm} {giá}.
   2) canon_units(): đơn vị đọc thành chữ ('ki lô gam' -> 'kg', 'ba phẩy tám' -> '3.8kg'), gọi trong normalize().
   3) asr_prompt()/vi_text(): sinh "script" gợi ý cho ASR bằng tiếng Việt (brand theo âm, dung tích/giá bằng chữ).
 Thêm brand / cách đọc mới: sửa BRAND_VI (+ BRAND_LATIN nếu brand mới). Gõ có dấu hay không dấu đều nhận. Phần tử ĐẦU TIÊN
-của mỗi danh sách là cách đọc chuẩn, dùng để viết prompt cho ASR.
+của mỗi danh sách là cách đọc chuẩn, dùng để viết prompt cho ASR. Muốn kiểm tra một cách nói lệch có được nhận không:
+phonetics.fold("xăn nai") == phonetics.fold("săn lai").
 """
 import re
 from .normalize import strip_accents
 
-# tên brand chuẩn (viết thường, không dấu, đúng như catalog) -> các cách đọc tiếng Việt
+# tên brand chuẩn (viết thường, không dấu, đúng như catalog) -> cách đọc GỐC (phiên âm). Giọng vùng miền KHÔNG ghi ở đây.
+# Chỉ thêm cách đọc thứ hai khi nó khác về nguyên âm/số âm tiết (vd "cờ lo súp" vs "clo súp", "pi ét" vs "pê ét"),
+# vì những chỗ đó phonetics.fold() không gộp được.
 BRAND_VI: dict[str, list[str]] = {
     "omo": ["ô mô"],
-    "ps": ["pi ét", "pe ét", "bi ét", "bê ét"],                        # P/S: b/p lẫn nhau
-    "closeup": ["clo súp", "clo sáp", "cờ lo súp", "cờ lo sáp", "lo súp", "lo sáp", "cờ lo xúp", "lo xúp"],
-    "dove": ["đô vơ", "đô", "đô ve", "giô vơ"],                         # gi/d lẫn nhau
-    "sunlight": ["săn lai", "xăn lai", "săn nai", "xăn nai"],           # s/x, l/n
-    "comfort": ["com phót", "com pho", "com po", "com bo"],             # ph/p/b
-    "clear": ["cờ lia", "lia", "kờ lia", "clia"],
-    "sunsilk": ["săn siu", "xăn siu", "săn xiu", "xăn xiu"],
-    "tresemme": ["tre se mê", "tre xe mê", "che se mê", "che xe mê", "tri se mê"],   # s/x, tr/ch
-    "hazeline": ["ha giô lin", "ha đô lin", "ha ze lin", "ha so lin", "ha xo lin", "ha de lin", "ha zo lin"],
-    "lifebuoy": ["lai bôi", "lai pôi"],
-    "vaseline": ["va so lin", "va giô lin", "va xo lin", "va đô lin", "va ze lin", "va de lin"],
+    "ps": ["pi ét", "pê ét"],                       # đọc chữ P kiểu Anh / kiểu Việt (b/p lẫn nhau do fold lo)
+    "closeup": ["clo súp", "cờ lo súp"],
+    "dove": ["đô vơ"],
+    "sunlight": ["săn lai"],
+    "comfort": ["com phót"],
+    "clear": ["cờ lia", "clia"],
+    "sunsilk": ["săn siu"],
+    "tresemme": ["tre se mê"],
+    "hazeline": ["ha giô lin", "ha ze lin"],
+    "lifebuoy": ["lai bôi"],
+    "vaseline": ["va so lin", "va ze lin"],
     "lux": ["lút", "lắc"],
-    "rexona": ["re xô na", "re sô na", "đê xô na", "đê sô na"],        # r/d, s/x
-    "axe": ["ét", "éc", "ắc"],
-    "surf": ["sốp", "xốp"],
-    "vim": ["vim", "vin", "bim"],
-    "cif": ["síp", "xíp", "cíp"],
-    "ponds": ["pon", "bon", "pong", "bong"],
-    "knorr": ["cờ nor", "cờ nô", "ca nô", "nor"],                       # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại
-    "walls": ["oan", "oao", "goa", "quan"],                             # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại
+    "rexona": ["re xô na"],
+    "axe": ["ét", "ắc"],
+    "surf": ["sốp"],
+    "vim": ["vim"],
+    "cif": ["síp", "cíp"],
+    "ponds": ["pon"],
+    "knorr": ["cờ nor", "ca nô"],                   # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại
+    "walls": ["oan"],                               # ĐOÁN, chưa có dữ liệu thật: kiểm tra lại ("quan"/"goa" đã được fold gộp về "oan")
 }
 
 # Cách viết Latin của brand TRONG alias/tên SKU sau normalize() (bỏ dấu, ký tự lạ thành khoảng trắng: "P/S" -> "p s", "Pond's" -> "pond s")
