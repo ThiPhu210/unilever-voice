@@ -42,7 +42,31 @@ _ONSET = [
     (re.compile(r"[ln]"), "L"),
 ]
 _VOWELS = "aeiouy"
-_SYL = re.compile(r"[^aeiouy]*[aeiouy]+(?:[^aeiouy]+(?![aeiouy]))?|[^aeiouy]+$")
+_DIGRAPH_END = re.compile(r"(ngh|ng|nh|tr|ch|kh|th|ph|gh|gi|qu)$")
+
+
+def _syllabify(t: str) -> list[str]:
+    """Tách từ Latin dài thành âm tiết: 'matcha' -> mat|cha, 'hazeline' -> ha|ze|li|ne, 'sunsilk' -> sun|silk.
+    Cụm phụ âm giữa hai nguyên âm: 1 chữ -> thuộc âm sau; nhiều chữ -> chữ/âm đôi cuối (ch, tr, ph...) sang âm sau, phần còn lại ở âm trước."""
+    parts = re.findall(r"[aeiouy]+|[^aeiouy]+", t)
+    if not any(p[0] in _VOWELS for p in parts):
+        return [t]
+    syls: list[str] = []
+    onset = ""
+    for k, p in enumerate(parts):
+        if p[0] in _VOWELS:
+            syls.append(onset + p)
+            onset = ""
+        elif not syls:
+            onset = p                      # cụm đầu từ
+        elif k == len(parts) - 1:
+            syls[-1] += p                  # cụm cuối từ -> âm cuối
+        else:
+            m = _DIGRAPH_END.search(p)
+            cut = len(p) - len(m.group()) if m else len(p) - 1
+            syls[-1] += p[:cut]
+            onset = p[cut:]
+    return syls
 _RIME = re.compile(r"([aeiouy]+)(ch|ng|nh|[tcpnm])?$")
 _CODA = {"ch": "k", "t": "k", "c": "k", "p": "k", "ng": "n", "nh": "n", "n": "n", "m": "m"}
 
@@ -73,7 +97,7 @@ def fold(text: str | list[str]) -> list[str]:
     out: list[str] = []
     for t in toks:
         t = strip_accents(t.lower())
-        out += [_syllable_key(s) for s in (_SYL.findall(t) if t.isalpha() else [t])]
+        out += [_syllable_key(s) for s in (_syllabify(t) if t.isalpha() else [t])]
     return out
 
 

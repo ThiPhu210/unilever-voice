@@ -16,7 +16,7 @@ QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
              "cai", "x", "la", "don", "gia", "moi", "tien", "dong", "vnd", "d"}
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
-AMBIGUOUS = {"nam", "sau", "bon"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
+AMBIGUOUS = {"nam", "sau", "bon", "bun"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
 BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
 SENT_END = re.compile(r"[.?!](?=\s|$)")
 MIN_MATCH = 0.6   # độ khớp SKU tối thiểu, dưới mức này coi là câu nói thường, bỏ qua
@@ -113,7 +113,12 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
 
     def flush():
         nonlocal qty, name, price
-        words = [t for t in name if t not in STOP_NAME]
+        # Từ đệm ("dạ", "nhé", "giá"...) chỉ bỏ ở HAI ĐẦU tên: chữ "la" giữa "ga la si" (Galaxy) là một âm tiết của tên hàng.
+        words = list(name)
+        while words and words[0] in STOP_NAME:
+            words.pop(0)
+        while words and words[-1] in STOP_NAME:
+            words.pop()
         if words:
             segs.append((qty, words, price))
         qty, name, price = None, [], None
@@ -173,10 +178,12 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
                 # ASR nghe sai chữ đứng trước ("Sỡ Tắm Gạo"): tên chưa có giá, token trước là chữ -> "tắm" là một phần của tên.
                 # Giữ nguyên "tám trăm gam" / "tám mươi" (số đọc thành chữ).
                 or (price is None and not SIZE_RE.match(name[-1])
-                    and not (i + 1 < n and (toks[i + 1] in {"tram", "muoi"} or toks[i + 1] in SIZE_UNIT_MAP)))):
+                    and not (i + 1 < n and (toks[i + 1] in {"tram", "muoi", "chuc"} or toks[i + 1] in SIZE_UNIT_MAP)))):
             name.append(t); i += 1; continue
         # Từ nhập nhằng KHÔNG phải số khi đang dở tên hàng, hoặc đứng ngay sau số lượng ("hai bon kem ..." = 2 x Pond's). Đã có giá -> dòng đã đóng, đây là số lượng dòng kế.
-        if not (t in AMBIGUOUS and price is None and (name or qty is not None)):
+        # ...trừ khi ngay sau là "trăm/mươi/chục": "bốn trăm bảy mươi gam" là số (470), còn "bon kem" mới là brand Pond's.
+        if not (t in AMBIGUOUS and price is None and (name or qty is not None)
+                and not (i + 1 < n and toks[i + 1] in {"tram", "muoi", "chuc"})):
             p = parse_number(toks, i)
             if p:
                 v, j = p

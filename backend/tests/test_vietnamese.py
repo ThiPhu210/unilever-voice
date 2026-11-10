@@ -216,3 +216,37 @@ def test_vi_text_khong_dong_vao_ma_hang():
 ])
 def test_alias_model_cu(env, expected):
     assert _resolve_model(env) == expected
+
+
+# ---------- Transcript thật (PhoWhisper, giọng lệch): từng lỗi phát hiện ở đây đều có test riêng ----------
+REAL_1 = ("bún kem đánh răng bê ép ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn một lia dầu gội đề mang đặc trị rào hai trăm gam "
+          "giá tám mươi ba ngàn ba nước lau sàng sơn lai tinh dầu phảo mộc viên vĩ bạch đèn một ký giá một trăm hai mươi sáu ngàn hai sữa tấm "
+          "lúa gà la si bốn trăm bảy mươi gam giá bảy bảy ngàn một sữa duyên thể hazard mắt da liu đỏ hai trăm ba mươi miu giá một trăm lẻ ba ngàn.")
+
+
+def test_transcript_that_du_5_dong():
+    got = [(i["sku_name"].split()[0], i["qty"], i["price"]) for o in parse_transcript(REAL_1, CAT)["orders"] for i in o["items"]]
+    assert got == [("P/S", 4, 60000), ("CLEAR", 1, 83000), ("SUNLIGHT", 3, 126000), ("LUX", 2, 77000), ("Hazeline", 1, 103000)]
+    sizes = [i["sku_name"].split()[-1].lower() for o in parse_transcript(REAL_1, CAT)["orders"] for i in o["items"]]
+    assert sizes == ["100g", "200g", "1kg", "470g", "230ml"]
+
+
+@pytest.mark.parametrize("spoken,vnd", [
+    ("bảy bảy ngàn", 77000), ("bảy bảy nghìn đồng", 77000), ("tám ba ngàn", 83000), ("một trăm hai sáu ngàn", 126000),
+    ("sáu chục ngàn", 60000), ("sáu chục nghìn", 60000), ("sáu mươi ngàn", 60000), ("một trăm lẻ ba ngàn", 103000),
+    ("bảy mươi bảy nghìn", 77000), ("chín chục nghìn đồng", 90000),
+])
+def test_gia_doc_nhieu_kieu(spoken, vnd):
+    from app.parser.prices import parse_price
+    toks = normalize(spoken).split()
+    assert parse_price(toks, 0)[0] == vnd
+
+
+@pytest.mark.parametrize("spoken", ["hai trăm ba mươi mi li lít", "hai trăm ba mươi miu", "hai trăm ba mươi mi li", "hai trăm ba mươi ml"])
+def test_ml_doc_nhieu_kieu(spoken):
+    assert normalize(spoken) == "hai tram ba muoi ml"
+
+
+def test_bon_tram_la_so_con_bon_kem_la_brand():
+    items, _ = one("Dạ mình chốt hai sữa tắm lúa galaxy bốn trăm bảy mươi gam giá bảy bảy ngàn. Ok em.")
+    assert items[0][0].startswith("lux-") and items[0][1:] == (2, 77000)

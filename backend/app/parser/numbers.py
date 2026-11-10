@@ -4,7 +4,9 @@ import re
 DIGITS = {
     "khong": 0, "mot": 1, "hai": 2, "ba": 3, "bon": 4, "tu": 4,
     "nam": 5, "lam": 5, "sau": 6, "bay": 7, "tam": 8, "chin": 9,
+    "bun": 4,          # ASR nghe "bốn" thành "bún" (gặp thật ở đầu câu chốt đơn)
 }
+TENS = {"muoi", "chuc"}   # "sáu mươi" = "sáu chục" = 60
 
 
 def parse_number(tokens: list[str], i: int):
@@ -12,7 +14,7 @@ def parse_number(tokens: list[str], i: int):
     t = tokens[i]
     if re.fullmatch(r"\d+", t):
         return int(t), i + 1
-    if t not in DIGITS and t not in ("muoi", "tram"):
+    if t not in DIGITS and t not in TENS and t != "tram":
         return None
 
     value, pending = 0, None
@@ -29,7 +31,7 @@ def parse_number(tokens: list[str], i: int):
                 break
             value += pending * 100
             pending, seen_hund, can_unit = None, True, True
-        elif t == "muoi":
+        elif t in TENS:
             if seen_tens:
                 break
             value += (pending or 1) * 10

@@ -3,7 +3,7 @@
 Chỉ nhận là giá khi có đơn vị tiền (nghìn/ngàn/k/đồng/triệu) hoặc là số >= 1000,
 để không nhầm với số lượng ("2 omo 800g, 1 clear ...")."""
 import re
-from .numbers import parse_number
+from .numbers import parse_number, DIGITS
 
 THOUSAND = {"nghin", "ngan", "ng", "k", "nghìn", "ngàn"}
 MILLION = {"trieu", "tr"}
@@ -33,6 +33,17 @@ def _tail_after_thousand(toks: list[str], j: int) -> tuple[int, int]:
         if p and 100 <= p[0] < 1000 and (p[0] % 10 == 0):
             return p[0], p[1]
     return 0, j
+
+
+def _spoken_digits(toks: list[str], i: int) -> tuple[int, int] | None:
+    """Giá đọc từng chữ số, không có "mươi": "bảy bảy ngàn" = 77k, "một trăm hai sáu ngàn" = 126k, "tám ba nghìn" = 83k.
+    Chỉ nhận khi ngay sau là nghìn/ngàn/triệu (đơn vị giá) nên không nhầm với số lượng."""
+    n, j, hund = len(toks), i, 0
+    if j + 1 < n and toks[j] in DIGITS and toks[j + 1] == "tram":
+        hund, j = DIGITS[toks[j]] * 100, j + 2
+    if j + 2 < n and toks[j] in DIGITS and toks[j + 1] in DIGITS and toks[j] != "khong" and toks[j + 2] in THOUSAND | MILLION:
+        return hund + DIGITS[toks[j]] * 10 + DIGITS[toks[j + 1]], j + 2
+    return None
 
 
 def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, int] | None:
@@ -71,9 +82,13 @@ def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, in
         value = int(round(value))
     else:
         p = parse_number(toks, i)
-        if not p or p[1] >= n or toks[p[1]] not in THOUSAND | MILLION:
-            return None
-        v, j = p
+        if p and p[1] < n and toks[p[1]] in THOUSAND | MILLION:
+            v, j = p
+        else:
+            p = _spoken_digits(toks, i)
+            if not p:
+                return None
+            v, j = p
         unit, j = toks[j], j + 1
         if unit in THOUSAND:
             value = v * 1000

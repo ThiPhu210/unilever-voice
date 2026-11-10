@@ -86,7 +86,7 @@ def brand_variants(alias: str) -> list[str]:
 _UNIT_FIX = [
     (re.compile(_NB + r"ki\s*lo\s*gr?am" + _NE), "kg"),
     (re.compile(_NB + r"ki\s*lo" + _NE), "kg"),
-    (re.compile(_NB + r"mi\s*li\s*lit" + _NE), "ml"),
+    (re.compile(_NB + r"(?:mi\s*li\s*lit|mi\s*li|mi\s*lit|miu|mil)" + _NE), "ml"),   # "mi li lít" / "mi li" / "miu"
     (re.compile(_NB + r"go\s*ram" + _NE), "gam"),
 ]
 _DIG = {"khong": "0", "mot": "1", "hai": "2", "ba": "3", "bon": "4", "nam": "5", "lam": "5",
