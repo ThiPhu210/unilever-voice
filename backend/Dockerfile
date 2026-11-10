@@ -8,5 +8,7 @@ COPY . .
 RUN mkdir -p /srv/models && python -c "import urllib.request as u; u.urlretrieve('https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx','/srv/models/speaker.onnx')"
 ENV SPEAKER_MODEL=/srv/models/speaker.onnx
 ENV DB_PATH=/data/app.db AUDIO_DIR=/data/audio HF_HOME=/data/hf
+# Model tiếng Việt (PhoWhisper medium, CTranslate2); tải lần đầu vào /data/hf rồi dùng lại. Đặt ASR_MODEL khi chạy để ghi đè
+ENV ASR_MODEL=nunu-willump/PhoWhisper-medium-ct2 PRELOAD_ASR=1
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

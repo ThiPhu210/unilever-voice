@@ -23,9 +23,9 @@ Parameters:
     Description: 'Loai may EC2. Tai khoan goi Free chi cho loai free-tier (vd m7i-flex.large, c7i-flex.large). Tai khoan Paid: c6i.xlarge.'
   AsrModel:
     Type: String
-    Default: small
-    AllowedValues: [small, medium, large-v3]
-    Description: Model Whisper (small nhe nhat, medium chinh xac hon nhung cham tren CPU)
+    Default: nunu-willump/PhoWhisper-medium-ct2
+    AllowedPattern: "^[A-Za-z0-9_./-]+$"
+    Description: 'Model nhan dien giong noi. Mac dinh: PhoWhisper medium tieng Viet. Cac gia tri cu small / medium / large-v3 duoc app tu anh xa sang PhoWhisper cung co (xem backend/app/asr.py). Muon Whisper goc thi dien ten repo day du (vd Systran/faster-whisper-medium).'
   SiteAddress:
     Type: String
     Default: ":80"
