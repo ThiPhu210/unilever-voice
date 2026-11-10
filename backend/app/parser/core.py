@@ -16,7 +16,7 @@ QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
              "cai", "x", "la", "don", "gia", "moi", "tien", "dong", "vnd", "d"}
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
-AMBIGUOUS = {"nam", "sau"}  # vừa là số vừa là từ thường (clear nam, ...)
+AMBIGUOUS = {"nam", "sau", "bon"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
 BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
 SENT_END = re.compile(r"[.?!](?=\s|$)")
 MIN_MATCH = 0.6   # độ khớp SKU tối thiểu, dưới mức này coi là câu nói thường, bỏ qua
@@ -134,6 +134,8 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
                     continue
                 if _comma_in_name(toks, i, name):
                     i += 1; continue
+            if t in {"va", "voi"} and not name and qty is not None:
+                name.append(t); i += 1; continue  # "2 va so lin ...": ngay sau số lượng là tên hàng (brand "Vaseline" đọc "va so lin"), không phải liên từ "và"
             if t in {"va", "voi"} and name and price is None and not _starts_item(toks, i):
                 name.append(t); i += 1; continue  # "và" nằm trong tên SKU, không phải ranh giới
             flush(); i += 1; continue
@@ -173,7 +175,8 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
                 or (price is None and not SIZE_RE.match(name[-1])
                     and not (i + 1 < n and (toks[i + 1] in {"tram", "muoi"} or toks[i + 1] in SIZE_UNIT_MAP)))):
             name.append(t); i += 1; continue
-        if not (t in AMBIGUOUS and name):
+        # Từ nhập nhằng KHÔNG phải số khi đang dở tên hàng, hoặc đứng ngay sau số lượng ("hai bon kem ..." = 2 x Pond's). Đã có giá -> dòng đã đóng, đây là số lượng dòng kế.
+        if not (t in AMBIGUOUS and price is None and (name or qty is not None)):
             p = parse_number(toks, i)
             if p:
                 v, j = p

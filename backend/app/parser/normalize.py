@@ -56,6 +56,10 @@ def normalize(text: str) -> str:
     # nếu không "sa" đứng trước số lượng và làm mất ngữ cảnh "số đầu câu" của bước nối dung tích bên dưới.
     t = re.sub(r"(?m)(^|[.?!]\s+)(?:sa|ba|khach|kh)\s*:\s*", r"\1", t)
     t = re.sub(r"[^a-z0-9.,;?!\s]", " ", t)
+    # Model tiếng Việt viết đơn vị theo âm ("chín ki lô gam", "ba trăm mi li lít", "ba phẩy tám ki") -> đơn vị chuẩn.
+    # (Brand đọc theo âm KHÔNG thay ở đây: xem brands.py, brand được nạp thành alias SKU trong Catalog.)
+    from .brands import canon_units
+    t = canon_units(t)
     # ASR nghe "92k" thành "92Khz"/"92kz" (k + hz): trong câu chốt đơn không có đơn vị tần số nào -> đọc lại là "92k".
     t = re.sub(r"(?<![\d.,])(\d{1,3})\s*(?:khz|kz)\b", r"\1k", t)
     t = re.sub(r"(\d)\s+([.,])\s*(\d{3})(?!\d)", r"\1\2\3", t)

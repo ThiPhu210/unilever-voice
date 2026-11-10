@@ -3,6 +3,8 @@ import os
 from rapidfuzz import fuzz
 from .normalize import strip_accents
 from .tokens import canon_tokens, SIZE_RE
+from .brands import vi_text, brand_variants
+from .normalize import normalize
 import re
 
 
@@ -40,15 +42,20 @@ class Catalog:
                     "sku_id": row["sku_id"], "name": row["name"], "unit": row["unit"], "barcode": row["barcode"],
                 }
                 aliases = [a for a in row["aliases"].split("|") if a.strip()] + [row["name"]]
+                seen: set[tuple[str, str | None]] = set()
                 for a in aliases:
-                    toks = canon_tokens(a)
-                    size = next((t for t in toks if SIZE_RE.match(t)), None)
-                    words = " ".join(t for t in toks if not SIZE_RE.match(t))
-                    self.index.append((row["sku_id"], words, size))
+                    # Mỗi alias có tên brand Latin được nhân thêm bản theo cách đọc tiếng Việt/vùng miền ("clear" -> "co lia", "lia"...)
+                    for text in [a, *brand_variants(normalize(a))]:
+                        toks = canon_tokens(text)
+                        size = next((t for t in toks if SIZE_RE.match(t)), None)
+                        words = " ".join(t for t in toks if not SIZE_RE.match(t))
+                        if (words, size) not in seen:
+                            seen.add((words, size))
+                            self.index.append((row["sku_id"], words, size))
 
     def hotwords(self) -> str:
-        """Chuỗi gợi ý cho ASR (initial_prompt) để nghe đúng tên SKU."""
-        return ", ".join(s["name"] for s in self.skus.values())
+        """Chuỗi gợi ý cho ASR (initial_prompt) để nghe đúng tên SKU, viết theo cách đọc tiếng Việt (brand theo âm, dung tích bằng chữ)."""
+        return ", ".join(vi_text(s["name"]) for s in self.skus.values())
 
     def match(self, words: list[str]) -> dict:
         # Có thể có NHIỀU "size" trong một dòng khi ASR chèn rác ("1 .5Kg BS ngừa sâu răng 100g"): chỉ cần MỘT size
