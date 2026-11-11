@@ -30,7 +30,7 @@ BRAND_VI: dict[str, list[str]] = {
     "clear": ["cờ lia", "clia"],
     "sunsilk": ["săn siu"],
     "tresemme": ["tre se mê"],
-    "hazeline": ["ha giô lin", "ha ze lin"],
+    "hazeline": ["ha giô lin", "ha ze lin", "hazard"],   # "hazard": Whisper hay viết thẳng chữ Latin sai này (không phải lệch vùng miền)
     "lifebuoy": ["lai bôi"],
     "vaseline": ["va so lin", "va ze lin"],
     "lux": ["lút", "lắc"],
@@ -78,6 +78,7 @@ _ALIAS_RULES = _build_alias_rules()
 TERM_VI: dict[str, list[str]] = {
     r"ceramides?": ["sê ra mai", "xê ra mít"],
     "pro": ["bồ", "pờ rô"],
+    "matcha": ["mát cha", "mắt da"],     # "mắt da"/"mắc cha": ASR nghe sai gặp lặp lại trong dữ liệu thật
     "serum": ["se rum", "xê rum"],
     "derma": ["đơ ma", "đe ma"],
 }

@@ -19,15 +19,19 @@ _UNIT_GROUP = {"g": "mass", "ml": "mass", "kg": "kilo", "l": "kilo"}   # g ~ ml,
 
 def _size_rel(a: str, b: str) -> str | None:
     """Quan hệ giữa dung tích nghe được `b` và dung tích alias `a` khi KHÔNG bằng nhau:
-    'unit' = cùng con số, khác g/ml (610ml ~ 610g); 'mag' = cùng chữ số có nghĩa, lệch bậc 10 (500ml ~ 50ml); None = khác hẳn."""
+    'unit' = cùng con số, khác g/ml (610ml ~ 610g); 'mag' = cùng chữ số có nghĩa, lệch bậc 10 hoặc 1000 (500ml ~ 50ml, 230 lít ~ 230ml); None = khác hẳn."""
     ma, mb = SIZE_RE.match(a), SIZE_RE.match(b)
-    if not (ma and mb) or _UNIT_GROUP.get(ma.group(2)) != _UNIT_GROUP.get(mb.group(2)):
+    if not (ma and mb):
         return None
     f = lambda x: float(x.replace(",", "."))
-    if f(ma.group(1)) == f(mb.group(1)):
+    same_group = _UNIT_GROUP.get(ma.group(2)) == _UNIT_GROUP.get(mb.group(2))
+    if same_group and f(ma.group(1)) == f(mb.group(1)):
         return "unit"
     sig = lambda x: x.replace(".", "").replace(",", "").strip("0")
-    return "mag" if sig(ma.group(1)) == sig(mb.group(1)) else None
+    # lệch bậc 10 cùng nhóm (500ml~50ml), hoặc nói "lít" cho "ml" (230 lít ~ 230ml: lệch 1000 lần) khi có >=2 chữ số có nghĩa
+    if sig(ma.group(1)) == sig(mb.group(1)) and (same_group or len(sig(ma.group(1))) >= 2):
+        return "mag"
+    return None
 
 
 class Catalog:

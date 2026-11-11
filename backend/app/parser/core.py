@@ -15,6 +15,10 @@ QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
              "bich", "hu", "bo", "lo", "can", "bao", "vi"}
 STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
              "cai", "x", "la", "don", "gia", "moi", "tien", "dong", "vnd", "d"}
+# Lời mở đầu / xã giao ("dạ em xin cảm ơn chị vậy mình chốt bốn kem ..."): không phải tên hàng. Bỏ ở hai đầu tên, và khi tên mới chỉ có
+# toàn từ này thì "bốn/sáu/năm" vẫn là SỐ LƯỢNG (không bị coi là brand Pond's / "sâu răng").
+OPENERS = {"em", "xin", "cam", "on", "chi", "anh", "chot", "minh", "vay", "oi", "ok", "roi", "gom", "luon", "len", "lay", "them", "dat", "mua",
+           "cho", "vang", "da", "a", "nhe", "nha", "ha", "la", "don", "va", "thi", "xong"}
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
 AMBIGUOUS = {"nam", "sau", "bon", "bun"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
 BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
@@ -115,9 +119,9 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
         nonlocal qty, name, price
         # Từ đệm ("dạ", "nhé", "giá"...) chỉ bỏ ở HAI ĐẦU tên: chữ "la" giữa "ga la si" (Galaxy) là một âm tiết của tên hàng.
         words = list(name)
-        while words and words[0] in STOP_NAME:
+        while words and (words[0] in STOP_NAME or words[0] in OPENERS):
             words.pop(0)
-        while words and words[-1] in STOP_NAME:
+        while words and (words[-1] in STOP_NAME or words[-1] in OPENERS):
             words.pop()
         if words:
             segs.append((qty, words, price))
@@ -182,7 +186,7 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             name.append(t); i += 1; continue
         # Từ nhập nhằng KHÔNG phải số khi đang dở tên hàng, hoặc đứng ngay sau số lượng ("hai bon kem ..." = 2 x Pond's). Đã có giá -> dòng đã đóng, đây là số lượng dòng kế.
         # ...trừ khi ngay sau là "trăm/mươi/chục": "bốn trăm bảy mươi gam" là số (470), còn "bon kem" mới là brand Pond's.
-        if not (t in AMBIGUOUS and price is None and (name or qty is not None)
+        if not (t in AMBIGUOUS and price is None and (any(w not in OPENERS and w not in STOP_NAME for w in name) or qty is not None)
                 and not (i + 1 < n and toks[i + 1] in {"tram", "muoi", "chuc"})):
             p = parse_number(toks, i)
             if p:

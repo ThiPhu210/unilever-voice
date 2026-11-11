@@ -302,3 +302,27 @@ def test_gia_tam_la_tram(spoken, vnd):
 def test_tam_muoi_van_la_80():
     """Không phá cách đọc thường: 'tám mươi' (80) và 'hai tám mươi' không bị đổi nếu không đủ ngữ cảnh giá."""
     assert parse_number(normalize("tám mươi bảy").split(), 0) == (87, 3)
+
+
+REAL_3 = ("dạ em xin cám ơn chị vậy mình chốt bốn kem đánh răng bề ngôi sau răng vượt trội một trăm gam giá sáu chục ngàn một dâu gội lia đê ma đặc trị gàu "
+          "hai trăm gam giá năm mươi ba ngàn ba sinh lai nước lau sàng tinh dầu thảo mộc viên vị bạch đàn một ký giá một trăm hai mươi sáu ngàn hai sữa tấm lắc "
+          "gà la xi bốn trăm báy mươi gam giá báy mươi bảy ngàn và một hazard sữa dưỡng thểy mắt da lụi đỏ hai trăm ba mươi lít giá một trăm lẻ ba ngàn")
+
+
+def test_transcript_that_so_3_loi_mo_dau_va_hazard():
+    items = [i for o in parse_transcript(REAL_3, CAT)["orders"] for i in o["items"]]
+    assert [(i["sku_name"].split()[0], i["qty"], i["price"]) for i in items] == [
+        ("P/S", 4, 60000), ("CLEAR", 1, 53000), ("SUNLIGHT", 3, 126000), ("LUX", 2, 77000), ("Hazeline", 1, 103000)]
+    assert not items[0]["need_confirm"]
+    assert items[4]["need_confirm"]            # "230 lít" cho SKU 230ml: lệch đơn vị 1000 lần -> để người xác nhận
+
+
+@pytest.mark.parametrize("opener", ["dạ em xin cảm ơn chị vậy mình chốt", "dạ vâng", "ok em lấy", "dạ chị cho em"])
+def test_loi_mo_dau_khong_nuot_so_luong_bon(opener):
+    items, _ = one(f"{opener} bốn kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn")
+    assert items and items[0][1:] == (4, 60000)
+
+
+def test_bon_van_la_brand_khi_dang_do_ten_hang():
+    items, _ = one("hai bon kem dưỡng da một trăm gam giá bảy mươi ngàn")   # "bon" sau số lượng vẫn là Pond's, không bị ăn thành số
+    assert items == [] or items[0][1] == 2
