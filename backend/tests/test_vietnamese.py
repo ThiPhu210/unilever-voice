@@ -326,3 +326,87 @@ def test_loi_mo_dau_khong_nuot_so_luong_bon(opener):
 def test_bon_van_la_brand_khi_dang_do_ten_hang():
     items, _ = one("hai bon kem dưỡng da một trăm gam giá bảy mươi ngàn")   # "bon" sau số lượng vẫn là Pond's, không bị ăn thành số
     assert items == [] or items[0][1] == 2
+
+
+REAL_4 = ("ờ dậy em bỏ giỏ hàng bốn kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn một dầu gội lia đê ma đặt chạy vào hai trăm gam "
+          "giá tám mươi ba ngàn ba nước lau sàng sinh lai tinh dâu hở một viên vỉ bạch đà một ký giá một trăm hai mươi sáu ngàn hai sữa tắm lắc ga lơ xi bốn trăm "
+          "bảy mươi gam giá bảy mươi bảy ngàn và một sữa diễn thể hazard mắc da lụi đỏ hai trăm ba mươi miu. giá một trăm lẻ ba nghìn. . cảm ơn và hẹn gặp lại.")
+
+
+def test_transcript_that_so_4_mo_dau_gio_hang_gia_tach_cau_chu_vo():
+    items = [i for o in parse_transcript(REAL_4, CAT)["orders"] for i in o["items"]]
+    assert [(i["sku_name"].split()[0], i["qty"], i["price"]) for i in items] == [
+        ("P/S", 4, 60000), ("CLEAR", 1, 83000), ("SUNLIGHT", 3, 126000), ("LUX", 2, 77000), ("Hazeline", 1, 103000)]
+    assert items[0]["sku_name"].endswith("100g") and not items[0]["qty_assumed"]
+
+
+def test_gia_nam_o_cau_rieng_sau_dau_cham():
+    items, _ = one("hai sữa tắm lắc ga la xi bốn trăm bảy mươi gam. giá bảy mươi bảy ngàn. Ok em.")
+    assert items[0][1:] == (2, 77000)
+
+
+def test_gia_cau_rieng_khong_nuot_cau_khac():
+    """Câu 'giá hơi cao' (không phải một mức giá) không bị dính vào dòng hàng."""
+    r = parse_transcript("hai sữa tắm lắc ga la xi bốn trăm bảy mươi gam giá bảy mươi bảy ngàn. giá hơi cao đó em. ok em", CAT)
+    assert r["orders"][0]["items"][0]["price"] == 77000 and r["orders"][0]["customer_confirm"] == "yes"
+
+
+@pytest.mark.parametrize("reply", [
+    "okay em", "lấy đi em", "ừ", "chốt", "chốt em", "dạ chốt", "ừ chốt đơn", "rồi em", "ờ rồi", "ô kê em", "vâng", "ừm lấy luôn", "đồng ý", "ốc kê em",
+])
+def test_khach_chot_don_dong_y(reply):
+    r = parse_transcript(f"mình chốt hai sữa tắm lắc ga la xi bốn trăm bảy mươi gam giá bảy mươi bảy ngàn. {reply}", CAT)
+    assert r["orders"][0]["customer_confirm"] == "yes", reply
+
+
+@pytest.mark.parametrize("reply", ["không em", "hông em", "thôi em không lấy", "ừ thôi để lần sau", "vâng để em suy nghĩ", "chưa em", "khoan đã"])
+def test_khach_tu_choi(reply):
+    r = parse_transcript(f"mình chốt hai sữa tắm lắc ga la xi bốn trăm bảy mươi gam giá bảy mươi bảy ngàn. {reply}", CAT)
+    assert r["orders"][0]["customer_confirm"] == "no", reply
+
+
+@pytest.mark.parametrize("reply", ["bên em có khuyến mãi không", "giảm thêm được không em", "giá hơi cao đó em"])
+def test_cau_hoi_khong_phai_chot_hay_tu_choi(reply):
+    r = parse_transcript(f"mình chốt hai sữa tắm lắc ga la xi bốn trăm bảy mươi gam giá bảy mươi bảy ngàn. {reply}", CAT)
+    assert r["orders"][0]["customer_confirm"] == "none", reply
+
+
+# ---------- Lời mở đầu / xã giao bất kỳ đứng trước dòng hàng đầu tiên: "bốn/năm/sáu" vẫn là SỐ LƯỢNG ----------
+_OPENERS = [
+    "ờ dậy em bỏ giỏ hàng cho chị", "dạ vậy mình chốt", "dạ em cảm ơn chị vậy em bỏ giỏ hàng cho mình", "dạ vâng em cảm ơn chị",
+    "dạ vậy em xin phép chốt đơn cho chị nha", "ok vậy em lên đơn cho chị nhé", "vậy chị lấy giúp em", "dạ chị cho em đặt",
+    "dạ vậy em ghi lại đơn của chị nha", "dạ vậy em lên đơn cho mình như sau", "dạ em xin xác nhận lại đơn hàng của chị", "dạ chị ơi em đọc lại đơn nha",
+    "dạ thôi mình lấy", "vâng vâng em ghi nhận", "ờ thôi em chốt", "à dạ em hiểu rồi vậy chị lấy", "dạ em tư vấn xong rồi thì chị chốt giúp em",
+    "dạ em cảm ơn chị đã ủng hộ bên em ạ vậy mình lên đơn nha", "vậy giờ em chốt cho chị món đầu tiên là", "dạ bên em ghi nhận đơn hàng của chị gồm có",
+    "alo dạ em nghe ạ vâng vậy chị đặt", "dạ tổng đơn của chị em đọc lại như sau", "thế thì cho em chốt luôn cho chị nhé",
+]
+_BODIES = [
+    ("bốn kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn", "P/S", 4, 60000),
+    ("năm sữa tắm lắc gà la xi bốn trăm bảy mươi gam giá bảy mươi bảy ngàn", "LUX", 5, 77000),
+    ("sáu nước lau sàn sunlight tinh dầu thảo mộc hương bạch đàn một ký giá một trăm hai mươi sáu ngàn", "SUNLIGHT", 6, 126000),
+]
+
+
+@pytest.mark.parametrize("opener", _OPENERS)
+@pytest.mark.parametrize("body,brand,qty,price", _BODIES)
+def test_loi_mo_dau_bat_ky_khong_nuot_so_luong(opener, body, brand, qty, price):
+    r = parse_transcript(f"{opener} {body}.", CAT)
+    got = [(i["sku_name"].split()[0], i["qty"], i["price"]) for o in r["orders"] for i in o["items"]]
+    assert got == [(brand, qty, price)], opener
+
+
+@pytest.mark.parametrize("text,qty,assumed", [
+    ("hai kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn", 2, False),
+    ("dạ em chốt một kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn", 1, False),
+    ("kem đánh răng ps ngừa sâu răng vượt trội một trăm gam giá sáu chục ngàn", 1, True),      # không nói số lượng -> giả định 1 + cần xác nhận
+    ("hai dầu gội clear nam bạc hà hai trăm gam giá tám mươi ba ngàn", 2, False),
+])
+def test_bon_nam_sau_nam_trong_ten_hang_van_la_chu(text, qty, assumed):
+    """'ngừa SÂU răng', 'clear NAM' nằm GIỮA tên hàng: không bị lời mở đầu logic cướp thành số lượng."""
+    items = [i for o in parse_transcript(text + ".", CAT)["orders"] for i in o["items"]]
+    assert len(items) == 1 and items[0]["qty"] == qty and items[0]["qty_assumed"] == assumed
+
+
+def test_tu_chi_la_so_sau_muoi():
+    assert parse_number(normalize("hai mươi tư").split(), 0) == (24, 3)
+    assert parse_number(normalize("tư vấn").split(), 0) is None

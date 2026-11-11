@@ -16,6 +16,8 @@ def parse_number(tokens: list[str], i: int):
         return int(t), i + 1
     if t not in DIGITS and t not in TENS and t != "tram":
         return None
+    if t == "tu" and not (i > 0 and tokens[i - 1] in TENS):
+        return None    # "tư" chỉ là số khi đứng sau "mươi/chục" ("hai mươi tư"); đứng đầu là chữ thường ("em tư vấn")
 
     value, pending = 0, None
     can_unit, seen_tens, seen_hund = True, False, False

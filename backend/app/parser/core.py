@@ -8,7 +8,8 @@ from .numbers import parse_number
 from .tokens import TOKEN_RE, SIZE_RE, SIZE_UNIT_MAP, size_norm
 from .catalog import Catalog
 from .prices import parse_price, price_suspect
-from .confirm_words import YES_RE, NO_RE, YES_OVERRIDE_RE
+from .numbers import DIGITS
+from .confirm_words import YES_START_RE, WEAK_YES, STRONG_NO_RE, QUESTION_RE, YES_RE, NO_RE, YES_OVERRIDE_RE
 
 SEPARATORS = {",", ";", "va", "voi", "cong", "them"}
 QTY_UNITS = {"chai", "goi", "lon", "hop", "thung", "tuyp", "tui", "loc", "cai",
@@ -18,9 +19,25 @@ STOP_NAME = {"a", "nhe", "nha", "ha", "da", "vang", "di", "cua", "loai", "hang",
 # Lời mở đầu / xã giao ("dạ em xin cảm ơn chị vậy mình chốt bốn kem ..."): không phải tên hàng. Bỏ ở hai đầu tên, và khi tên mới chỉ có
 # toàn từ này thì "bốn/sáu/năm" vẫn là SỐ LƯỢNG (không bị coi là brand Pond's / "sâu răng").
 OPENERS = {"em", "xin", "cam", "on", "chi", "anh", "chot", "minh", "vay", "oi", "ok", "roi", "gom", "luon", "len", "lay", "them", "dat", "mua",
-           "cho", "vang", "da", "a", "nhe", "nha", "ha", "la", "don", "va", "thi", "xong"}
+           "cho", "vang", "da", "a", "nhe", "nha", "ha", "la", "don", "va", "thi", "xong",
+           "day", "gio", "hang", "vao", "bo"}   # "dậy" = "vậy" giọng Nam; "bỏ (vào) giỏ hàng"
+def _trim_openers(words: list[str]) -> list[str]:
+    """Bỏ lời mở đầu / từ đệm ở hai đầu tên. "...giỏ hàng" là cụm xã giao rõ nghĩa: bỏ luôn mọi thứ đứng trước nó."""
+    words = list(words)
+    for k in range(min(len(words) - 1, 6)):
+        if words[k] == "gio" and words[k + 1] == "hang":
+            words = words[k + 2:]
+            break
+    skip = lambda w: w in STOP_NAME or w in OPENERS
+    while words and (skip(words[0]) or (words[0] == "o" and len(words) > 1 and skip(words[1]))):   # "ờ dậy em ..."; "o mo" (Omo) thì giữ
+        words.pop(0)
+    while words and skip(words[-1]):
+        words.pop()
+    return words
+
+
 LEAD_STRIP = {"don", "luon", "cho", "nhe", "la", "gom", "vay"}
-AMBIGUOUS = {"nam", "sau", "bon", "bun"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
+AMBIGUOUS = {"nam", "sau", "bon", "bun", "tu"}  # vừa là số vừa là từ thường (clear nam, bồn cầu, Pond's đọc "bon", ...)
 BATH_PREV = {"sua", "phong", "dau", "bon", "gel"}  # "sữa/xà phòng/dầu tắm": 'tam' ở đây là TẮM, không phải số TÁM
 SENT_END = re.compile(r"[.?!](?=\s|$)")
 MIN_MATCH = 0.6   # độ khớp SKU tối thiểu, dưới mức này coi là câu nói thường, bỏ qua
@@ -32,7 +49,15 @@ LIST_NO = re.compile(r"(^|[,;]\s*)(\d{1,2})\.(?=\s)")
 def detect_customer_confirm(after: str) -> tuple[str, str | None]:
     after = " ".join(after.split()[:25])
     after = YES_OVERRIDE_RE.sub("ok", after)  # "không sao", "thôi được", "cũng được"... = đồng ý
+    after = QUESTION_RE.sub(" hoi ", after)    # câu hỏi "có ... không" / "được không": bỏ ra khỏi việc dò yes/no
     y, n = YES_RE.search(after), NO_RE.search(after)
+    ys = YES_START_RE.match(after)             # "chốt", "dạ chốt", "rồi em"... ở đầu phản hồi
+    if ys and (not y or ys.start() <= y.start() or y.group() in WEAK_YES) and not (n and n.start() < ys.end() and not YES_START_RE.match(after[n.start():])):
+        y = ys
+    if y and n and y.group() in WEAK_YES and y.start() < n.start():
+        sn = STRONG_NO_RE.search(after, y.end())    # "ừ... thôi để lần sau": 'ừ' chỉ là đệm
+        if sn:
+            return "no", sn.group()
     if y and (not n or y.start() < n.start()):
         return "yes", y.group()
     if n:
@@ -111,18 +136,31 @@ def _comma_in_name(toks: list[str], i: int, name: list[str]) -> bool:
             and toks[j] not in SEPARATORS and parse_number(toks, j) is None)
 
 
-def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
+def _is_new_item_start(toks: list[str], i: int, name: list[str], catalog: Catalog) -> bool:
+    """toks[i] là "bốn/năm/sáu" mơ hồ (chữ trong tên hay số lượng?), `name` là chữ đã gom trước nó. Thử CẢ HAI cách hiểu rồi để catalog quyết:
+      A) nó là số lượng, tên hàng bắt đầu từ chữ sau nó;  B) nó nằm trong tên: <chữ trước> + nó + <chữ sau>.
+    Chọn A khi tên theo cách A khớp SKU không kém B (lời xã giao chen vào B luôn làm điểm B tụt). Không cần liệt kê lời mở đầu: câu xã giao nào đứng trước cũng chỉ làm B tệ đi.
+    "kem đánh răng ps ngừa SÂU răng ...": A = "răng vượt trội" kém hơn B = cả cụm -> giữ là chữ."""
+    look = []
+    for t in toks[i + 1:i + 12]:
+        if t in SEPARATORS or t == "gia":
+            break
+        look.append(t)
+    if not look or toks[i + 1] in DIGITS:     # "...như SAU bốn kem...": "sau" là chữ thường, số lượng là "bốn" ngay sau nó
+        return False
+    top = lambda w: catalog.match(w)["candidates"][0]["score"]    # điểm thô của SKU đầu bảng (conf bị chặn 0.6 khi hai SKU sát nhau nên không dùng)
+    score_a = top(look)
+    return score_a >= 100 * MIN_MATCH and score_a + 0.5 >= top(_trim_openers(name) + [toks[i]] + look)
+
+
+def scan_segments(text: str, catalog: Catalog | None = None) -> list[tuple[int | None, list[str], int | None]]:
     toks = TOKEN_RE.findall(text)
     segs, qty, name, price = [], None, [], None
 
     def flush():
         nonlocal qty, name, price
         # Từ đệm ("dạ", "nhé", "giá"...) chỉ bỏ ở HAI ĐẦU tên: chữ "la" giữa "ga la si" (Galaxy) là một âm tiết của tên hàng.
-        words = list(name)
-        while words and (words[0] in STOP_NAME or words[0] in OPENERS):
-            words.pop(0)
-        while words and (words[-1] in STOP_NAME or words[-1] in OPENERS):
-            words.pop()
+        words = _trim_openers(name)
         if words:
             segs.append((qty, words, price))
         qty, name, price = None, [], None
@@ -186,8 +224,11 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
             name.append(t); i += 1; continue
         # Từ nhập nhằng KHÔNG phải số khi đang dở tên hàng, hoặc đứng ngay sau số lượng ("hai bon kem ..." = 2 x Pond's). Đã có giá -> dòng đã đóng, đây là số lượng dòng kế.
         # ...trừ khi ngay sau là "trăm/mươi/chục": "bốn trăm bảy mươi gam" là số (470), còn "bon kem" mới là brand Pond's.
-        if not (t in AMBIGUOUS and price is None and (any(w not in OPENERS and w not in STOP_NAME for w in name) or qty is not None)
-                and not (i + 1 < n and toks[i + 1] in {"tram", "muoi", "chuc"})):
+        amb_in_name = (t in AMBIGUOUS and price is None and (bool(_trim_openers(name)) or qty is not None)
+                       and not (i + 1 < n and toks[i + 1] in {"tram", "muoi", "chuc"}))
+        if amb_in_name and qty is None and catalog is not None and _is_new_item_start(toks, i, name, catalog):
+            amb_in_name = False   # phần trước KHÔNG có chữ nào là tên hàng (lời xã giao bất kỳ), phần sau là tên hàng -> đây là số lượng
+        if not amb_in_name:
             p = parse_number(toks, i)
             if p:
                 v, j = p
@@ -207,10 +248,36 @@ def scan_segments(text: str) -> list[tuple[int | None, list[str], int | None]]:
     return segs
 
 
+def _merge_broken(segs: list, catalog: Catalog) -> list:
+    """ASR nghe sai một chữ trong tên thành SỐ ("tinh dầu hở MỘT viên vỉ bạch đàn": thảo mộc -> 'hở một') nên parser tách làm hai dòng,
+    dòng đầu mất giá. Gộp lại khi dòng đầu không có giá và bản gộp khớp catalog TỐT HƠN dòng sau đứng riêng."""
+    out: list = []
+    k = 0
+    while k < len(segs):
+        qty, words, price = segs[k]
+        if price is None and qty is not None and k + 1 < len(segs) and segs[k + 1][2] is not None:
+            _, w2, p2 = segs[k + 1]
+            merged = catalog.match(words + w2)["conf"]
+            if merged >= MIN_MATCH and merged > catalog.match(w2)["conf"]:
+                out.append((qty, words + w2, p2)); k += 2; continue
+        out.append(segs[k]); k += 1
+    return out
+
+
+def _is_price_only(sentence: str) -> bool:
+    """Câu chỉ là một mức giá ("giá một trăm lẻ ba nghìn"): ASR chèn dấu chấm giữa dòng hàng và giá của nó."""
+    toks = TOKEN_RE.findall(sentence)
+    j = _skip_price_lead(toks, 0)
+    if j == 0 and not toks[:1] == ["gia"]:
+        return False
+    p = parse_price(toks, j, kg_as_k=True)
+    return bool(p) and all(t in SEPARATORS or t in STOP_NAME or t in OPENERS for t in toks[p[1]:])
+
+
 def _items_in(sentence: str, catalog: Catalog) -> list[dict]:
     """Trong một câu, chỉ giữ dòng có ĐỦ số lượng + sản phẩm khớp catalog + giá."""
     items = []
-    for qty, words, price in scan_segments(sentence):
+    for qty, words, price in _merge_broken(scan_segments(sentence, catalog), catalog):
         if price is None:       # bắt buộc có giá
             continue
         res = catalog.match(words)
@@ -231,7 +298,13 @@ def _item_groups(text: str, catalog: Catalog) -> list[tuple[list[dict], str]]:
     (đến câu có hàng kế tiếp) là 'phản hồi' của nhóm đó. Trả về [(items, after_text)]."""
     text = LIST_NO.sub(r"\1\2", text)           # bỏ số thứ tự ASR tự thêm: "1. omo" -> "1 omo"
     groups: list[list] = []
+    sents: list[str] = []
     for sent in filter(str.strip, SENT_END.split(text)):
+        if sents and _is_price_only(sent) and scan_segments(sents[-1]) and scan_segments(sents[-1])[-1][2] is None:
+            sents[-1] += " " + sent     # "… 230 ml. giá 103 nghìn": giá thuộc dòng hàng ngay trước
+        else:
+            sents.append(sent)
+    for sent in sents:
         items = _items_in(sent, catalog)
         if items:
             groups.append([items, []])
