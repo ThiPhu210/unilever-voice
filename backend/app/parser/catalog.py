@@ -3,7 +3,7 @@ import os
 from rapidfuzz import fuzz
 from .normalize import strip_accents
 from .tokens import canon_tokens, SIZE_RE
-from .brands import vi_text, brand_variants
+from .brands import vi_text, brand_variants, BRAND_VI
 from .phonetics import fold
 from .normalize import normalize
 import re
@@ -75,6 +75,18 @@ class Catalog:
                         if (words, size) not in seen:
                             seen.add((words, size))
                             self.index.append((row["sku_id"], words, size))
+
+    def export_payload(self) -> dict:
+        """Chỉ mục đã dựng sẵn cho app (on-device parser): app chỉ cần so khớp, không phải chạy lại brands/fold lúc nạp.
+        `version` đổi khi danh mục/alias/luật phiên âm đổi -> app tải lại. `hotwords`: từ gợi ý cho bộ nhận dạng giọng nói của HĐH."""
+        import hashlib, json
+        skus = [{"sku_id": s["sku_id"], "name": s["name"], "unit": s["unit"], "barcode": s["barcode"]} for s in self.skus.values()]
+        index = [[a, b, c] for a, b, c in self.index]
+        brands = [v[0] for v in BRAND_VI.values()]
+        phrases = ["vậy mình chốt", "nghìn đồng", "ki lô gam", "mi li lít", "gam"]
+        body = {"skus": skus, "index": index, "hotwords": brands + phrases}
+        version = hashlib.sha1(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
+        return {"version": version, **body}
 
     def hotwords(self) -> str:
         """Chuỗi gợi ý cho ASR (initial_prompt) để nghe đúng tên SKU, viết theo cách đọc tiếng Việt (brand theo âm, dung tích bằng chữ)."""

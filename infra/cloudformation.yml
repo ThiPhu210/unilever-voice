@@ -34,6 +34,11 @@ Parameters:
     Type: String
     Default: 0.0.0.0/0
     Description: Dai IP duoc truy cap web/API (mac dinh mo cho tat ca, API van duoc bao ve boi API key)
+  AudioRetentionDays:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    Description: 'So ngay giu file ghi am tren S3 truoc khi tu xoa (0 = giu mai). Dat theo chinh sach luu tru du lieu giong noi cua cong ty.'
   CreateGitHubOidcProvider:
     Type: String
     Default: "true"
@@ -63,6 +68,7 @@ Parameters:
 
 Conditions:
   CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, "true"]
+  HasAudioRetention: !Not [!Equals [!Ref AudioRetentionDays, 0]]
 
 Resources:
   # ---------- Container registry ----------
@@ -153,6 +159,37 @@ Resources:
                   - ec2:DescribeInstances
                 Resource: "*"
 
+  # ---------- Luu tru file ghi am (S3) ----------
+  # Rieng tu hoan toan: khong public, ma hoa san, chi EC2 (role ben duoi) doc/ghi; nghe lai bang presigned URL ngan han do API cap.
+  # Khong chuyen sang tang IA/Glacier: moi file chi ~100-200 KB, duoi muc tinh phi toi thieu 128 KB cua cac tang do nen se TON HON.
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:
+        Rules:
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: {DaysAfterInitiation: 2}
+          - !If
+            - HasAudioRetention
+            - Id: expire-audio
+              Status: Enabled
+              Prefix: audio/
+              ExpirationInDays: !Ref AudioRetentionDays
+            - !Ref AWS::NoValue
+      Tags:
+        - {Key: App, Value: unilever-voice}
+
   # ---------- EC2 ----------
   InstanceRole:
     Type: AWS::IAM::Role
@@ -166,6 +203,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyName: audio-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub "${AudioBucket.Arn}/audio/*"
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -247,6 +292,8 @@ Resources:
           DATABASE_URL=postgresql://voiceadmin:${DbPassword}@${Database.Endpoint.Address}:5432/voicecoach
           ASR_MODEL=${AsrModel}
           SITE_ADDRESS=${SiteAddress}
+          AUDIO_BUCKET=${AudioBucket}
+          AWS_REGION=${AWS::Region}
           ENVEOF
           chmod 600 /opt/app/.env
           touch /opt/app/.ready
@@ -257,6 +304,9 @@ Resources:
       InstanceId: !Ref Instance
 
 Outputs:
+  AudioBucketName:
+    Description: Bucket S3 luu file ghi am (API doc AUDIO_BUCKET tu .env)
+    Value: !Ref AudioBucket
   DeployRoleArn:
     Description: Dan gia tri nay vao GitHub Variables -> AWS_ROLE_ARN
     Value: !GetAtt GitHubDeployRole.Arn

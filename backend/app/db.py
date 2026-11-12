@@ -46,7 +46,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions(
     id TEXT PRIMARY KEY, sa_id TEXT, sa_name TEXT, store TEXT,
     created_at TEXT NOT NULL, audio_path TEXT, duration REAL,
-    status TEXT, error TEXT, transcript_text TEXT, segments_json TEXT);
+    status TEXT, error TEXT, transcript_text TEXT, segments_json TEXT,
+    client_id TEXT, source TEXT, asr_engine TEXT, parser_version TEXT, parser_match INTEGER);
 CREATE TABLE IF NOT EXISTS orders(
     id {pk}, session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE, closing_text TEXT,
     customer_confirm TEXT, items_json TEXT, needs_review INTEGER,
@@ -89,6 +90,14 @@ CREATE INDEX IF NOT EXISTS idx_auth_tokens_ba ON auth_tokens(ba_key);
 """
 
 
+# Cột thêm cho phiên tạo từ app (nhận dạng giọng nói trên máy): DB đã có từ trước được thêm cột khi khởi động
+_SESSION_COLS = [("client_id", "TEXT"), ("source", "TEXT"), ("asr_engine", "TEXT"),
+                 ("parser_version", "TEXT"), ("parser_match", "INTEGER")]
+# app tự sinh client_id: gửi lại cùng phiên (mạng chập chờn / retry) không tạo bản trùng
+_CLIENT_IDX = ("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_client ON sessions(sa_id, client_id) "
+               "WHERE client_id IS NOT NULL")
+
+
 def init():
     pk = "BIGSERIAL PRIMARY KEY" if IS_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
     script = SCHEMA.format(pk=pk)
@@ -99,12 +108,20 @@ def init():
             # DB đã có từ trước (bảng skus chưa có cột barcode): thêm cột, rồi mới tạo index
             c.execute("ALTER TABLE skus ADD COLUMN IF NOT EXISTS barcode TEXT")
             c.execute("CREATE INDEX IF NOT EXISTS idx_skus_barcode ON skus(barcode)")
+            for col, typ in _SESSION_COLS:
+                c.execute(f"ALTER TABLE sessions ADD COLUMN IF NOT EXISTS {col} {typ}")
+            c.execute(_CLIENT_IDX)
     else:
         with _sqlite() as c:
             c.executescript(script)
             if "barcode" not in [r[1] for r in c.execute("PRAGMA table_info(skus)")]:
                 c.execute("ALTER TABLE skus ADD COLUMN barcode TEXT")
             c.execute("CREATE INDEX IF NOT EXISTS idx_skus_barcode ON skus(barcode)")
+            have = [r[1] for r in c.execute("PRAGMA table_info(sessions)")]
+            for col, typ in _SESSION_COLS:
+                if col not in have:
+                    c.execute(f"ALTER TABLE sessions ADD COLUMN {col} {typ}")
+            c.execute(_CLIENT_IDX)
 
 
 def execute(sql, args=()):
