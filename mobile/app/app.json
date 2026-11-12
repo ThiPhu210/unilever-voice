@@ -36,6 +36,13 @@
           "microphonePermission": "Ghi âm cuộc tư vấn với khách hàng"
         }
       ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Ghi âm cuộc tư vấn với khách hàng",
+          "speechRecognitionPermission": "Nhận dạng giọng nói để tự tạo đơn hàng từ cuộc tư vấn"
+        }
+      ],
       "expo-secure-store"
     ]
   }

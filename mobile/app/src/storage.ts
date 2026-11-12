@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+import type { Order as ParsedOrder } from "./parser";
 import { Settings } from "./types";
 
 const K = "uv_settings";
@@ -27,7 +28,18 @@ export async function clearToken() {
 }
 
 // Hàng đợi upload offline: lưu {uri, createdAt, sa...} chờ có mạng thì gửi.
-export type Pending = { uri: string; saId: string; saName: string; store: string; createdAt: number };
+// Bản ghi có `cid` + `transcript` đã được nhận dạng và tách đơn NGAY TRÊN MÁY: gửi kết quả (JSON) rồi mới gửi audio.
+// Bản ghi cũ / máy không nhận dạng được: chỉ có `uri` -> gửi audio cho server dịch (luồng cũ).
+export type Pending = {
+  uri: string; saId: string; saName: string; store: string; createdAt: number;
+  cid?: string;                    // client_id: server dùng để gửi lại không bị tạo trùng
+  transcript?: string;
+  engine?: string;                 // "ios-speech" | "android-speech"
+  durationSec?: number;
+  orders?: ParsedOrder[] | null;   // null: máy chưa có danh mục để tách đơn -> server tách từ transcript
+  parserVersion?: string;
+  sessionId?: string;              // đã tạo phiên trên server; còn lại bước gửi audio
+};
 
 export async function getQueue(): Promise<Pending[]> {
   const raw = await AsyncStorage.getItem(Q);

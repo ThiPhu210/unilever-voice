@@ -1,5 +1,6 @@
 import { AuthResult, AuthStatus, CatalogItem, LineIn, SessionDetail, SessionRow, Settings } from "./types";
 import * as FileSystem from "expo-file-system/legacy";
+import type { Order as ParsedOrder } from "./parser";
 import { getQueue, Pending, setQueue } from "./storage";
 
 // ---------- Phiên đăng nhập ----------
@@ -72,15 +73,28 @@ export const audioUrl = (s: Settings, id: string) =>
   `${s.server.replace(/\/+$/, "")}/api/sessions/${id}/audio` +
   (s.token ? `?token=${encodeURIComponent(s.token)}` : "");
 
-/** Tải file ghi âm của một cuộc tư vấn về bộ nhớ đệm (gửi token bằng header) rồi trả về đường dẫn file trên máy.
- *  Phát file local ổn định hơn stream trực tiếp (không lo Range, HTTP cleartext, header...), và báo lỗi rõ ràng. */
+/** Tải file ghi âm của một cuộc tư vấn về bộ nhớ đệm rồi trả về đường dẫn file trên máy.
+ *  Phát file local ổn định hơn stream trực tiếp (không lo Range, HTTP cleartext, header...), và báo lỗi rõ ràng.
+ *  Audio nằm ở S3: hỏi server link tải tạm (presigned) rồi tải KHÔNG kèm Authorization — S3 từ chối khi có cả hai cách xác thực.
+ *  Server cũ chưa có /audio-url -> tải thẳng /audio như trước. */
 export async function downloadAudio(s: Settings, id: string): Promise<string> {
   if (!s.server) throw new Error("Chưa cấu hình địa chỉ server");
   const dest = `${FileSystem.cacheDirectory}audio-${id}.m4a`;
   const info = await FileSystem.getInfoAsync(dest);
   if (info.exists && (info as any).size > 0) return dest;
-  const res = await FileSystem.downloadAsync(`${s.server}/api/sessions/${id}/audio`, dest, { headers: bearer(s) });
-  if (res.status === 401) throw expired();
+
+  let url = `${s.server}/api/sessions/${id}/audio`;
+  let auth = true;
+  try {
+    const meta = await req<{ url: string; auth: boolean }>(s, `/api/sessions/${id}/audio-url`);
+    url = /^https?:/i.test(meta.url) ? meta.url : s.server + meta.url;
+    auth = meta.auth;
+  } catch (e: any) {
+    if (e?.message === EXPIRED) throw e;
+    // 404 (server cũ chưa có /audio-url), mạng chập chờn...: thử đường cũ; nếu thật sự không có audio thì /audio sẽ báo 404
+  }
+  const res = await FileSystem.downloadAsync(url, dest, auth ? { headers: bearer(s) } : {});
+  if (res.status === 401 && auth) throw expired();
   if (res.status !== 200) {
     await FileSystem.deleteAsync(dest, { idempotent: true });
     throw new Error(`Server trả lỗi ${res.status}`);
@@ -95,7 +109,7 @@ async function uploadOne(s: Settings, p: Pending): Promise<string> {
     httpMethod: "POST",
     uploadType: FileSystem.FileSystemUploadType.MULTIPART,
     fieldName: "audio",
-    mimeType: "audio/m4a",
+    mimeType: /\.wav$/i.test(p.uri) ? "audio/wav" : "audio/m4a",
     headers: bearer(s),
     parameters: { sa_id: p.saId, sa_name: p.saName, store: p.store },
   });
@@ -104,10 +118,68 @@ async function uploadOne(s: Settings, p: Pending): Promise<string> {
   return JSON.parse(res.body).id as string;
 }
 
-/** Thêm bản ghi vào hàng đợi rồi thử gửi toàn bộ. Trả về số bản còn tồn + id các cuộc vừa gửi được. */
-export async function enqueueAndFlush(s: Settings, uri?: string): Promise<{ left: number; ids: string[]; error?: string }> {
+/** Bản ghi mới đưa vào hàng đợi. Có `transcript` = đã nhận dạng + tách đơn trên máy (xem RecordScreen). */
+export type NewRecording = {
+  uri: string; durationMs?: number; transcript?: string; engine?: string;
+  orders?: ParsedOrder[] | null; parserVersion?: string;
+};
+
+const newClientId = () =>
+  `${Date.now().toString(36)}-${Array.from({ length: 12 }, () => Math.floor(Math.random() * 36).toString(36)).join("")}`;
+
+/** Chuyển file ghi âm ra khỏi thư mục cache (HĐH có thể dọn cache khi thiếu bộ nhớ) vì còn đang chờ gửi. */
+async function keepFile(uri: string, cid: string): Promise<string> {
+  if (!FileSystem.documentDirectory) return uri;
+  const dest = `${FileSystem.documentDirectory}rec-${cid}.wav`;
+  try { await FileSystem.moveAsync({ from: uri, to: dest }); return dest; } catch { return uri; }
+}
+
+/** Gửi kết quả nhận dạng + đơn (JSON). Gọi lại an toàn: cùng client_id thì server trả lại phiên cũ. */
+async function syncMeta(s: Settings, p: Pending): Promise<{ id: string; audio_needed: boolean; duplicate: boolean }> {
+  return req(s, "/api/sessions/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: p.cid, transcript: p.transcript, duration: p.durationSec, captured_at: p.createdAt,
+      sa_id: p.saId, sa_name: p.saName, store: p.store, asr_engine: p.engine ?? "",
+      parser_version: p.parserVersion ?? "", orders: p.orders ?? null,
+    }),
+  });
+}
+
+/** Gửi file ghi âm (WAV) cho một phiên đã tạo. Server nén AAC rồi lưu S3. Xong thì xoá file trên máy. */
+async function uploadAudioFor(s: Settings, sessionId: string, uri: string): Promise<void> {
+  const info = await FileSystem.getInfoAsync(uri);
+  if (!info.exists) return;   // file đã bị HĐH dọn: đơn vẫn nguyên vẹn, chỉ mất bản nghe lại
+  const res = await FileSystem.uploadAsync(`${s.server}/api/sessions/${sessionId}/audio`, uri, {
+    httpMethod: "POST",
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: "audio",
+    mimeType: "audio/wav",
+    headers: bearer(s),
+  });
+  if (res.status === 401) throw expired();
+  if (res.status < 200 || res.status >= 300) throw new Error(`Server trả lỗi ${res.status}`);
+  await FileSystem.deleteAsync(uri, { idempotent: true });
+}
+
+/** Thêm bản ghi vào hàng đợi rồi thử gửi toàn bộ. Trả về số bản còn tồn + id các phiên MỚI tạo trong lần gọi này. */
+export async function enqueueAndFlush(s: Settings, rec?: string | NewRecording): Promise<{ left: number; ids: string[]; error?: string }> {
   const q = await getQueue();
-  if (uri) q.push({ uri, saId: s.saId, saName: s.saName, store: s.store, createdAt: Date.now() });
+  if (rec) {
+    const r: NewRecording = typeof rec === "string" ? { uri: rec } : rec;
+    const base = { saId: s.saId, saName: s.saName, store: s.store, createdAt: Date.now() };
+    if (r.transcript !== undefined) {
+      const cid = newClientId();
+      q.push({
+        ...base, uri: await keepFile(r.uri, cid), cid, transcript: r.transcript, engine: r.engine,
+        durationSec: r.durationMs !== undefined ? r.durationMs / 1000 : undefined,
+        orders: r.orders ?? null, parserVersion: r.parserVersion,
+      });
+    } else {
+      q.push({ ...base, uri: r.uri });
+    }
+  }
   const left: Pending[] = [];
   const ids: string[] = [];
   let error: string | undefined;
@@ -115,7 +187,16 @@ export async function enqueueAndFlush(s: Settings, uri?: string): Promise<{ left
   for (const p of q) {
     if (p.saId && p.saId !== s.saId) { left.push(p); continue; }   // bản ghi của BA khác: giữ lại, chỉ gửi khi BA đó đăng nhập
     try {
-      ids.push(await uploadOne(s, p));
+      if (p.cid && p.transcript !== undefined) {
+        if (!p.sessionId) {                       // bước 1: kết quả nhận dạng + đơn
+          const r = await syncMeta(s, p);
+          p.sessionId = r.id;
+          if (!r.duplicate) ids.push(r.id);
+        }
+        await uploadAudioFor(s, p.sessionId, p.uri);   // bước 2: audio (lỗi -> giữ lại, lần sau chỉ gửi lại bước này)
+      } else {
+        ids.push(await uploadOne(s, p));          // luồng cũ: gửi audio cho server dịch
+      }
     } catch (e: any) {
       const m = String(e?.message || e);
       error = /Network request failed|Failed to fetch/i.test(m)
