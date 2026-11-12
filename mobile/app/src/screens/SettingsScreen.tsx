@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { deleteVoiceprint, pendingCount, ping, revokeToken, voiceprintStatus } from "../api";
 import { Banner, Button, Card, Field, Pill, Title } from "../components";
 import EnrollScreen from "./EnrollScreen";
 import { saveSettings } from "../storage";
+import { OfflineStatus, downloadOfflineModel, offlineStatus } from "../stt";
 import { C, S } from "../theme";
 import { Settings } from "../types";
 
@@ -17,6 +18,24 @@ export default function SettingsScreen({ settings, onSaved, onLogout }: {
   const [busy, setBusy] = useState(false);
   const [enrolled, setEnrolled] = useState<boolean | null>(null);  // null: chưa biết (chưa kết nối server)
   const [enrolling, setEnrolling] = useState(false);
+  const [offline, setOffline] = useState<OfflineStatus | null>(null);
+  const [offlineMsg, setOfflineMsg] = useState("");
+  const [dl, setDl] = useState(false);
+
+  const checkOffline = () => offlineStatus().then(setOffline);
+  useEffect(() => { checkOffline(); }, []);
+
+  async function toggleOffline(v: boolean) {
+    const next = { ...settings, offlineStt: v };
+    await saveSettings(next);
+    onSaved(next);
+  }
+
+  async function getModel() {
+    setDl(true);
+    try { setOfflineMsg(await downloadOfflineModel()); } catch (e: any) { setOfflineMsg("Không tải được: " + String(e?.message || e)); }
+    finally { setDl(false); checkOffline(); }
+  }
 
   useEffect(() => {
     if (!settings.server || !settings.token) { setEnrolled(null); return; }
@@ -83,6 +102,25 @@ export default function SettingsScreen({ settings, onSaved, onLogout }: {
         <Field label="Cửa hàng / điểm bán" value={store} onChangeText={setStore} autoCapitalize="words" style={{ marginTop: S.sm }} />
         <Button label="Lưu và kiểm tra kết nối" onPress={save} loading={busy} style={{ marginTop: S.lg }} />
         {status && <Banner tone={status.ok ? "ok" : "bad"} text={status.text} style={{ marginTop: S.md, marginBottom: 0 }} />}
+
+        <Text style={st.sec}>Nhận dạng giọng nói</Text>
+        <Card style={{ marginTop: S.sm }}>
+          <Pill
+            text={!offline ? "Đang kiểm tra..." : !offline.supported ? "Máy không hỗ trợ offline" : offline.installed ? "Đã cài gói tiếng Việt" : "Chưa cài gói tiếng Việt"}
+            tone={offline?.installed ? "green" : "amber"} />
+          <View style={{ flexDirection: "row", alignItems: "center", marginTop: S.md, gap: S.md }}>
+            <Text style={{ flex: 1, color: C.ink, fontWeight: "700" }}>Nhận dạng offline trên máy</Text>
+            <Switch value={!!settings.offlineStt} onValueChange={toggleOffline} disabled={!offline?.installed} accessibilityLabel="Nhận dạng offline" />
+          </View>
+          <Text style={{ color: C.muted, lineHeight: 20, marginTop: S.sm }}>
+            Nhanh hơn, dùng được khi không có mạng và không gửi âm thanh cho Google/Apple. Cần tải gói tiếng Việt một lần (khoảng vài chục MB). Chất lượng có thể khác chế độ online.
+          </Text>
+          {offline?.supported && !offline.installed && (
+            <Button kind="ghost" label="Tải gói tiếng Việt" onPress={getModel} loading={dl} style={{ marginTop: S.md }} />
+          )}
+          {!!offline?.reason && <Text style={{ color: C.muted, marginTop: S.sm }}>Lý do: {offline.reason}.</Text>}
+          {!!offlineMsg && <Banner tone="info" text={offlineMsg} style={{ marginTop: S.md, marginBottom: 0 }} />}
+        </Card>
 
         <Text style={st.sec}>Giọng nói của bạn</Text>
         <Card style={{ marginTop: S.sm }}>

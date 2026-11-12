@@ -10,10 +10,15 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.example.unilevervoice",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Ghi âm cuộc tư vấn với khách hàng"
+        "NSMicrophoneUsageDescription": "Ghi âm cuộc tư vấn với khách hàng",
+        "NSSpeechRecognitionUsageDescription": "Nhận dạng giọng nói để tự tạo đơn hàng từ cuộc tư vấn",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -23,7 +28,11 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.example.unilevervoice",
       "permissions": [
-        "RECORD_AUDIO"
+        "RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ]
     },
     "web": {
@@ -43,7 +52,20 @@
           "speechRecognitionPermission": "Nhận dạng giọng nói để tự tạo đơn hàng từ cuộc tư vấn"
         }
       ],
-      "expo-secure-store"
-    ]
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d1fb4425-e45f-4492-a86c-de0eb1531c38"
+      }
+    }
   }
 }

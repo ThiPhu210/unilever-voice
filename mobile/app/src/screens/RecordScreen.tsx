@@ -9,7 +9,7 @@ import { cachedCatalog, loadCatalog, refreshCatalog } from "../catalogStore";
 import { Button, Card, Pill } from "../components";
 import { mmss, vnd } from "../format";
 import { Order as ParsedOrder, PARSER_VERSION, parseTranscript } from "../parser";
-import { SttSession, startStt, sttSupport, transcribeFile } from "../stt";
+import { SttSession, offlineStatus, startStt, sttSupport, transcribeFile } from "../stt";
 import { C } from "../theme";
 import { Settings } from "../types";
 
@@ -41,6 +41,7 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
   const [nativeMs, setNativeMs] = useState(0);
   const [partial, setPartial] = useState("");
   const session = useRef<SttSession | null>(null);
+  const offlineRun = useRef(false);   // lần ghi này có chạy offline không (để dịch lại từ file cùng chế độ)
   const startedAt = useRef(0);
   const rec = nativeRec || state.isRecording;
   const elapsed = nativeRec ? nativeMs : state.durationMillis;
@@ -97,7 +98,10 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
     try {
       setResult(null); setPartial("");
       const cat = await cachedCatalog();          // không chờ mạng: chưa có thì bỏ qua gợi ý từ khoá
+      // Bật offline chỉ khi người dùng đã chọn VÀ gói vi-VN đã cài; thiếu gói thì lùi về online thay vì lỗi
+      offlineRun.current = !!settings.offlineStt && (await offlineStatus()).installed;
       session.current = await startStt({
+        offline: offlineRun.current,
         hotwords: cat?.hotwords ?? [],
         onLevel: (v) => setLevels((l) => [...l.slice(1), v]),
         onPartial: setPartial,
@@ -126,7 +130,7 @@ export default function RecordScreen({ settings, onUploaded }: { settings: Setti
       if (!r.uri) throw new Error("Không lưu được file ghi âm" + (r.error ? ` (${r.error})` : ""));
       const cat = await cachedCatalog();
       let transcript = r.transcript.trim();
-      if (!transcript) transcript = (await transcribeFile(r.uri, cat?.hotwords ?? [])).trim();   // dịch lại từ file đã lưu
+      if (!transcript) transcript = (await transcribeFile(r.uri, cat?.hotwords ?? [], offlineRun.current)).trim();   // dịch lại từ file đã lưu
       let orders: ParsedOrder[] | null = null;
       if (transcript) {
         try {

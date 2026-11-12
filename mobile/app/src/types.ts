@@ -1,5 +1,9 @@
 /** token: phiên đăng nhập do server cấp (lưu trong SecureStore). Rỗng = chưa đăng nhập. */
-export type Settings = { server: string; token: string; saId: string; saName: string; store: string };
+export type Settings = {
+  server: string; token: string; saId: string; saName: string; store: string;
+  /** Nhận dạng offline (không gửi âm thanh cho Google/Apple). Chỉ có hiệu lực khi gói vi-VN đã cài trên máy. */
+  offlineStt?: boolean;
+};
 /** Kết quả dò mã BA: unknown = chưa được cấp, set_password = lần đầu (tự đặt mật khẩu), login = đã có mật khẩu. */
 export type AuthStatus = "unknown" | "set_password" | "login";
 export type AuthResult = { token: string; sa_id: string; sa_name?: string; store?: string };
