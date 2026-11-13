@@ -27,7 +27,7 @@ BRAND_VI: dict[str, list[str]] = {
     "dove": ["đô vơ"],
     "sunlight": ["săn lai"],
     "comfort": ["com phót"],
-    "clear": ["cờ lia", "clia"],
+    "clear": ["cờ lia", "clia", "cái ly"],           # "cái ly": Google/Siri nghe "một clear" thành "một cái ly" (gặp thật ở bản ghi trên Android)
     "sunsilk": ["săn siu"],
     "tresemme": ["tre se mê"],
     "hazeline": ["ha giô lin", "ha ze lin", "hazard"],   # "hazard": Whisper hay viết thẳng chữ Latin sai này (không phải lệch vùng miền)
@@ -117,6 +117,11 @@ _NUM2 = r"(\d|" + "|".join(k for k in _DIG2 if k != "rua") + r")"
 _KY_DEC = re.compile(_NB + _NUM + r"\s+(?:ky|kg|ki\s*lo|ki)\s+" + _NUM2 + r"(?=\s*(?:gia\b|da\b|[,;.?!]|$))")
 
 
+# ASR hay nghe "một ký" thành "một tí"/"một ty": số + "ti|ty" đứng NGAY TRƯỚC "giá" / dấu câu / hết câu là dung tích "ký".
+# ("một ti vi ..." không bị đụng vì sau "ti" là một từ khác.)
+_TI_KY = re.compile(_NB + _NUM + r"\s+(?:ti|ty)(?=\s*(?:gia\b|da\b|[,;.?!]|$))")
+
+
 def _ky_sub(m: re.Match) -> str:
     return f"{_DIG.get(m.group(1), m.group(1))}.{_DIG2.get(m.group(2), m.group(2))}kg"
 
@@ -130,6 +135,7 @@ def canon_units(t: str) -> str:
     for rx, rep in _UNIT_FIX:
         t = rx.sub(rep, t)
     t = _DEC.sub(_dec_sub, t)
+    t = _TI_KY.sub(lambda m: f"{m.group(1)} ky", t)
     return _KY_DEC.sub(_ky_sub, t)
 
 

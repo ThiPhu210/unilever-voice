@@ -63,11 +63,53 @@ function tamLaTram(toks: string[], i: number): string[] {
   return out;
 }
 
+/** Số 0-99 viết bằng chữ số ("5", "50") hoặc một chữ số đọc bằng chữ ("năm"). */
+function small(t: string): number | null {
+  if (/^\d{1,2}$/.test(t)) return parseInt(t, 10);
+  return isDigitWord(t) ? DIGITS[t] : null;
+}
+
+/** Giá đọc LẪN chữ số và chữ ("2 trăm lẻ 1 ngàn", "3 trăm 50 nghìn") = 201k / 350k (xem _mixed_hundreds trong prices.py). */
+function mixedHundreds(toks: string[], i: number): [number, number] | null {
+  const n = toks.length;
+  if (i + 1 >= n || toks[i + 1] !== "tram") return null;
+  const h = small(toks[i]);
+  if (h === null || h < 1 || h > 9) return null;
+  let numeric = /^\d+$/.test(toks[i]), value = h * 100, j = i + 2;
+  if (j < n && (toks[j] === "le" || toks[j] === "linh")) {
+    j += 1;
+    const u = j < n ? small(toks[j]) : null;
+    if (u === null || u < 1 || u > 9) return null;
+    numeric = numeric || /^\d+$/.test(toks[j]); value += u; j += 1;
+  } else if (j < n && /^\d{1,2}$/.test(toks[j]) && parseInt(toks[j], 10) >= 1) {
+    numeric = true; value += parseInt(toks[j], 10); j += 1;
+  } else {
+    const p = j < n ? parseNumber(toks, j) : null;
+    if (p && p[0] >= 1 && p[0] < 100) { value += p[0]; j = p[1]; }
+  }
+  if (!numeric || j >= n || !isThousandOrMillion(toks[j])) return null;
+  return [value, j];
+}
+
 /** Thử đọc giá tại vị trí i. Trả về [vnd, vị_trí_kế_tiếp] hoặc null. kgAsK: coi "92Kg" là "92k". */
 export function parsePrice(toks: string[], i: number, kgAsK = false): [number, number] | null {
   const n = toks.length;
   if (i >= n) return null;
   const t = toks[i];
+  const mx = mixedHundreds(toks, i);
+  if (mx) {
+    let [v, j2] = mx;
+    const unit = toks[j2]; j2 += 1;
+    let val: number;
+    if (THOUSAND.has(unit)) {
+      val = v * 1000;
+      const [extra, j3] = tailAfterThousand(toks, j2);
+      val += extra; j2 = j3;
+    } else {
+      val = v * 1_000_000;
+    }
+    return [val, skipCurrency(toks, j2)];
+  }
   const m = NUM_TOKEN.exec(t);
   let value: number, j: number;
   if (m) {
@@ -80,6 +122,9 @@ export function parsePrice(toks: string[], i: number, kgAsK = false): [number, n
     if (GROUPED.test(num)) {
       if (unit !== null && (THOUSAND.has(unit) || MILLION.has(unit))) return null;
       value = parseInt(num.replace(/[.,]/g, ""), 10);
+    } else if ((unit === null || CURRENCY.has(unit)) && /^\d{3}0[.,]000$/.test(num)) {
+      // Google ghi "hai trăm lẻ một ngàn" thành "2010.000đ" (thừa một số 0 trước ".000"): đọc lại là 201.000đ (xem prices.py)
+      value = parseInt(num.slice(0, 3), 10) * 1000;
     } else {
       const f = parseFloat(num.replace(",", "."));
       value = f;

@@ -60,6 +60,39 @@ def _tam_la_tram(toks: list[str], i: int) -> list[str]:
     return out
 
 
+def _small(t: str) -> int | None:
+    """Số 0-99 viết bằng chữ số ("5", "50") hoặc một chữ số đọc bằng chữ ("năm")."""
+    if re.fullmatch(r"\d{1,2}", t):
+        return int(t)
+    return DIGITS.get(t)
+
+
+def _mixed_hundreds(toks: list[str], i: int) -> tuple[int, int] | None:
+    """Giá đọc LẪN chữ số và chữ ("2 trăm lẻ 1 ngàn", "3 trăm 50 nghìn", "hai trăm lẻ 1 ngàn") = 201k / 350k.
+    Bộ nhận dạng của HĐH (Google/Siri) hay trả số theo kiểu này. Chỉ nhận khi CÓ ÍT NHẤT MỘT token số (cụm toàn chữ đã có
+    nhánh parse_number) và ngay sau là nghìn/ngàn/triệu. Trả về (giá trị trước đơn vị, vị trí token đơn vị)."""
+    n = len(toks)
+    if i + 1 >= n or toks[i + 1] != "tram":
+        return None
+    h = _small(toks[i])
+    if h is None or not 1 <= h <= 9:
+        return None
+    numeric, value, j = toks[i].isdigit(), h * 100, i + 2
+    if j < n and toks[j] in ("le", "linh"):                  # "2 trăm lẻ 1": chỉ nhận một chữ số 1-9
+        j += 1
+        u = _small(toks[j]) if j < n else None
+        if u is None or not 1 <= u <= 9:
+            return None
+        numeric, value, j = numeric or toks[j].isdigit(), value + u, j + 1
+    elif j < n and re.fullmatch(r"\d{1,2}", toks[j]) and int(toks[j]) >= 1:     # "3 trăm 50" / "2 trăm 1"
+        numeric, value, j = True, value + int(toks[j]), j + 1
+    elif j < n and (p := parse_number(toks, j)) and 1 <= p[0] < 100:       # "2 trăm mười" / "3 trăm hai mươi lăm"
+        value, j = value + p[0], p[1]
+    if not numeric or j >= n or toks[j] not in THOUSAND | MILLION:
+        return None
+    return value, j
+
+
 def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, int] | None:
     """Thử đọc giá tại vị trí i. Trả về (vnd, vị_trí_kế_tiếp) hoặc None.
     kg_as_k=True: coi "92Kg" (số nguyên 1-3 chữ số + kg/ky/ki) là "92k" = 92.000đ."""
@@ -67,6 +100,16 @@ def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, in
     if i >= n:  # hết câu ngay sau dấu phẩy / chữ "giá" -> không có gì để đọc
         return None
     t = toks[i]
+    if (mx := _mixed_hundreds(toks, i)) is not None:
+        v, j = mx
+        unit, j = toks[j], j + 1
+        if unit in THOUSAND:
+            value = v * 1000
+            extra, j = _tail_after_thousand(toks, j)
+            value += extra
+        else:
+            value = v * 1_000_000
+        return value, _skip_currency(toks, j)
     m = NUM_TOKEN.match(t)
     if m:
         num, suffix = m.groups()
@@ -82,6 +125,10 @@ def parse_price(toks: list[str], i: int, kg_as_k: bool = False) -> tuple[int, in
             if unit in THOUSAND | MILLION:
                 return None
             value = int(re.sub(r"[.,]", "", num))
+        elif unit in (None, *CURRENCY) and re.fullmatch(r"\d{3}0[.,]000", num):
+            # Google ghi "hai trăm lẻ một ngàn" thành "2010.000đ" (thừa một số 0 trước ".000"): đọc lại là 201.000đ.
+            # Chỉ đúng dạng 3 chữ số + "0" + ".000"; giá triệu hợp lệ ("2.010.000") đã đi nhánh GROUPED ở trên.
+            value = int(num[:3]) * 1000
         else:
             value = float(num.replace(",", "."))
             if unit in THOUSAND:

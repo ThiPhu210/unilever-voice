@@ -1,9 +1,3 @@
-"""Nơi lưu file audio hội thoại: S3 (khi có AUDIO_BUCKET) hoặc ổ đĩa local (dev / tương thích dữ liệu cũ).
-
-`audio_path` trong bảng sessions là "tham chiếu": đường dẫn local (dữ liệu cũ, dev) hoặc `s3://bucket/key`.
-Nghe lại với S3: server kiểm tra quyền rồi cấp presigned URL ngắn hạn, client tải thẳng từ S3 (không qua EC2).
-Credentials lấy từ IAM role của EC2 (xem infra/cloudformation.yml), không cần khoá trong .env.
-"""
 import os
 import shutil
 import threading
@@ -11,7 +5,7 @@ import threading
 AUDIO_DIR = os.getenv("AUDIO_DIR", "data/audio")
 AUDIO_BUCKET = os.getenv("AUDIO_BUCKET", "")
 AUDIO_PREFIX = os.getenv("AUDIO_PREFIX", "audio").strip("/")
-PRESIGN_TTL = int(os.getenv("AUDIO_PRESIGN_TTL", "900"))   # giây; đủ để tải một đoạn <1 phút
+PRESIGN_TTL = int(os.getenv("AUDIO_PRESIGN_TTL", "900")) 
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
 _client = None
@@ -32,7 +26,8 @@ def _s3():
         if _client is None:
             import boto3
             from botocore.config import Config
-            _client = boto3.client("s3", config=Config(signature_version="s3v4", retries={"max_attempts": 3}))
+            region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or None
+            _client = boto3.client("s3", region_name=region, config=Config(signature_version="s3v4", retries={"max_attempts": 3}))
         return _client
 
 

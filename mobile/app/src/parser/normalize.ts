@@ -25,9 +25,13 @@ const NUM2 = "(\\d|" + Object.keys(DIG2).filter((k) => k !== "rua").join("|") + 
 const KY_DEC = new RegExp(
   NB + NUM + "\\s+(?:ky|kg|ki\\s*lo|ki)\\s+" + NUM2 + "(?=\\s*(?:gia\\b|da\\b|[,;.?!]|$))", "g");
 
+// ASR hay nghe "một ký" thành "một tí"/"một ty": số + "ti|ty" ngay trước "giá" / dấu câu / hết câu là dung tích "ký".
+const TI_KY = new RegExp(NB + NUM + "\\s+(?:ti|ty)(?=\\s*(?:gia\\b|da\\b|[,;.?!]|$))", "g");
+
 export function canonUnits(t: string): string {
   for (const [rx, rep] of UNIT_FIX) t = t.replace(rx, rep);
   t = t.replace(DEC, (_m, a: string, b: string, unit: string) => `${DIG[a] ?? a}.${DIG[b] ?? b}${unit}`);
+  t = t.replace(TI_KY, (_m, a: string) => `${a} ky`);
   return t.replace(KY_DEC, (_m, a: string, b: string) => `${DIG[a] ?? a}.${DIG2[b] ?? b}kg`);
 }
 
